@@ -126,13 +126,15 @@ if __name__ == "__main__":
         flow_input, pickle_result = _parse_argparse_args()
 
     from structure_workflow_executor import StructureWorkflowExecutor
-    from workflow import execute_workflow  # type: ignore[attr-defined]
-
     from griptape_nodes.drivers.storage import StorageBackend
 
     workflow_file_path = Path(__file__).parent / "workflow.py"
     workflow_runner = StructureWorkflowExecutor(storage_backend=StorageBackend("gtc"))
 
+    # Set libraries BEFORE importing workflow so the flow is created with correct library state
     _set_libraries(LIBRARIES)
+
+    # Import workflow AFTER _set_libraries to avoid state being cleared
+    from workflow import execute_workflow  # type: ignore[attr-defined]
 
     execute_workflow(input=flow_input, workflow_executor=workflow_runner, pickle_control_flow_result=pickle_result)
