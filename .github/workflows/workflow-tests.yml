@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GT_CLOUD_API_KEY: ${{ secrets.GT_CLOUD_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     strategy:
       fail-fast: false
       matrix:
