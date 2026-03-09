@@ -1,4 +1,5 @@
 import logging
+import os
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
@@ -55,10 +56,14 @@ async def setup_test_library(griptape_nodes: GriptapeNodes) -> AsyncGenerator[No
     # Save the original libraries state
     original_libraries = config_manager.get_config_value(key=LIBRARIES_TO_REGISTER_KEY, default=[])
 
-    # Set this library for testing
+    # Set this library for testing, plus any additional libraries specified via env var
+    libraries = [str(LIBRARY_ROOT / "griptape_nodes_library.json")]
+    additional = os.environ.get("ADDITIONAL_LIBRARY_JSONS", "")
+    if additional:
+        libraries.extend(p for p in additional.split(os.pathsep) if p)
     config_manager.set_config_value(
         key=LIBRARIES_TO_REGISTER_KEY,
-        value=[str(LIBRARY_ROOT / "griptape_nodes_library.json")],
+        value=libraries,
     )
 
     yield  # Run all tests
