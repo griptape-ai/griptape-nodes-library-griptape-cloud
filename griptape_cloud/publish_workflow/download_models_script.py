@@ -1,7 +1,8 @@
 import logging
 import shlex
+import os
 
-from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub import hf_hub_download, snapshot_download, login
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,6 +21,8 @@ def download_models(commands: list[str]) -> None:
                 huggingface-cli download "repo_id"
                 huggingface-cli download "repo_id" "filename"
     """
+    token = os.environ.get("HF_TOKEN", "").strip()
+    login(token=token, add_to_git_credential=False)
     for cmd in commands:
         logger.info("Executing: %s", cmd)
         match shlex.split(cmd):
