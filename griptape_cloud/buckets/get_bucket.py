@@ -1,10 +1,11 @@
 import logging
 from typing import Any
 
-from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
-from griptape_cloud.buckets.bucket_options import BucketOptions
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import DataNode
+
+from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
+from griptape_cloud.buckets.bucket_options import BucketOptions
 
 logger = logging.getLogger("griptape_nodes")
 logger.setLevel(logging.INFO)
@@ -70,7 +71,7 @@ class GetBucket(BaseGriptapeCloudNode, DataNode):
         except Exception as e:
             exceptions.append(e)
 
-        return exceptions if exceptions else None
+        return exceptions or None
 
     def after_value_set(
         self, parameter: Parameter, value: Any, modified_parameters_set: set[str] | None = None

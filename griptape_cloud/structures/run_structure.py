@@ -2,10 +2,10 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from griptape_cloud_client.types import Unset
+from griptape_nodes.exe_types.core_types import Parameter, ParameterGroup, ParameterList, ParameterMode
+from griptape_nodes.exe_types.node_types import ControlNode
 
 from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
-from griptape_nodes.exe_types.core_types import Parameter, ParameterGroup, ParameterList, ParameterMode
-from griptape_nodes.exe_types.node_types import AsyncResult, ControlNode
 
 if TYPE_CHECKING:
     from griptape_cloud_client.models.structure_detail import StructureDetail
@@ -96,7 +96,7 @@ class RunStructure(BaseGriptapeCloudNode, ControlNode):
             exceptions.append(e)
 
         # if there are exceptions, they will display when the user tries to run the flow with the node.
-        return exceptions if exceptions else None
+        return exceptions or None
 
     def _process(self) -> None:
         include_events = self.get_parameter_value("include_events")
@@ -114,7 +114,5 @@ class RunStructure(BaseGriptapeCloudNode, ControlNode):
         output = structure_run.output if not isinstance(structure_run.output, Unset) else None
         self.parameter_output_values["output"] = output
 
-    def process(
-        self,
-    ) -> AsyncResult[None]:
-        yield lambda: self._process()
+    async def aprocess(self) -> None:
+        self._process()

@@ -1,7 +1,6 @@
 from typing import Any
 from urllib.parse import urljoin
 
-from griptape_cloud.base.base_griptape_cloud_node import DEFAULT_GRIPTAPE_CLOUD_URL
 from griptape_nodes.exe_types.core_types import (
     NodeMessageResult,
     Parameter,
@@ -17,6 +16,8 @@ from griptape_nodes.traits.button import (
     ModalContentPayload,
     OnClickMessageResultPayload,
 )
+
+from griptape_cloud.base.base_griptape_cloud_node import DEFAULT_GRIPTAPE_CLOUD_URL
 
 
 class GriptapeCloudWebhookConfigParameter:

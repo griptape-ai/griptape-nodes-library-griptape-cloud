@@ -1,10 +1,11 @@
 from typing import Any
 from urllib.parse import urljoin
 
-from griptape_cloud.base.base_griptape_cloud_node import DEFAULT_GRIPTAPE_CLOUD_URL
 from griptape_nodes.exe_types.core_types import NodeMessageResult, Parameter, ParameterGroup, ParameterMode
 from griptape_nodes.exe_types.node_types import BaseNode
 from griptape_nodes.traits.button import Button, ButtonDetailsMessagePayload, OnClickMessageResultPayload
+
+from griptape_cloud.base.base_griptape_cloud_node import DEFAULT_GRIPTAPE_CLOUD_URL
 
 
 class GriptapeCloudStructureConfigParameter:

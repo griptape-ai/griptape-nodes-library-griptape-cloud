@@ -16,11 +16,11 @@ from pathlib import Path
 from typing import Any
 
 from griptape_cloud_client.models.update_structure_response_content import UpdateStructureResponseContent
+from griptape_nodes.retained_mode.events.parameter_events import AddParameterToNodeRequest
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 from griptape_cloud.publish_workflow.griptape_cloud_published_workflow import GriptapeCloudPublishedWorkflow
 from griptape_cloud.publish_workflow.griptape_cloud_start_flow import GriptapeCloudStartFlow
-from griptape_nodes.retained_mode.events.parameter_events import AddParameterToNodeRequest
-from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 logger = logging.getLogger("griptape_nodes")
 

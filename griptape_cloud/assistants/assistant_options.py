@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from griptape_cloud_client.models.assistant_detail import AssistantDetail
-
 from griptape_nodes.exe_types.core_types import Parameter
 from griptape_nodes.traits.options import Options
 
@@ -16,7 +15,7 @@ logger.setLevel(logging.INFO)
 class AssistantOptions(Options):
     choices_value_lookup: dict[str, AssistantDetail] = field(kw_only=True)
 
-    def __init__(self, *, choices: list, choices_value_lookup: dict[str, AssistantDetail]):
+    def __init__(self, *, choices: list, choices_value_lookup: dict[str, AssistantDetail]) -> None:
         super().__init__(choices=choices)
         self.choices_value_lookup = choices_value_lookup
 
