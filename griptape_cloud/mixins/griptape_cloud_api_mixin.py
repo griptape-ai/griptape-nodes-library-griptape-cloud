@@ -432,6 +432,4 @@ class GriptapeCloudApiMixin:
             time.sleep(0.5)
 
     def _is_deployment_ready(self, deployment: GetDeploymentResponseContent | StructureDeploymentDetail) -> bool:
-        return deployment.status in [
-            DeploymentStatus.SUCCEEDED,
-        ]
+        return deployment.status == DeploymentStatus.SUCCEEDED

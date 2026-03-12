@@ -1,14 +1,15 @@
 import logging
 from typing import Any
 
+from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
+from griptape_nodes.exe_types.node_types import StartNode
+
 from griptape_cloud.publish_workflow.parameters.griptape_cloud_structure_config_parameter import (
     GriptapeCloudStructureConfigParameter,
 )
 from griptape_cloud.publish_workflow.parameters.griptape_cloud_webhook_config_parameter import (
     GriptapeCloudWebhookConfigParameter,
 )
-from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
-from griptape_nodes.exe_types.node_types import StartNode
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ class GriptapeCloudStartFlow(StartNode):
 
     def validate_before_workflow_run(self) -> list[Exception] | None:
         exceptions = super().validate_before_workflow_run() or []
-        return exceptions if exceptions else None
+        return exceptions or None
 
     def process(self) -> None:
         pass

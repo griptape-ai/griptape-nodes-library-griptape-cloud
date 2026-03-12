@@ -2,11 +2,11 @@ import logging
 from typing import TYPE_CHECKING, cast
 
 from griptape_cloud_client.models.assert_url_operation import AssertUrlOperation
-
-from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import ControlNode
 from griptape_nodes.traits.options import Options
+
+from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
 
 if TYPE_CHECKING:
     from griptape_cloud_client.models.bucket_detail import BucketDetail
@@ -88,9 +88,9 @@ class CreateAssetUrl(BaseGriptapeCloudNode, ControlNode):
             exceptions.append(e)
 
         # if there are exceptions, they will display when the user tries to run the flow with the node.
-        return exceptions if exceptions else None
+        return exceptions or None
 
-    def process(self) -> None:
+    def _process(self) -> None:
         bucket = cast("BucketDetail", self.get_parameter_value("bucket"))
         asset_name = self.get_parameter_value("asset_name")
         operation = self.get_parameter_value("operation")
@@ -99,3 +99,6 @@ class CreateAssetUrl(BaseGriptapeCloudNode, ControlNode):
             response = self._create_asset_url(asset_name, bucket.bucket_id, AssertUrlOperation(operation))
             self.set_parameter_value("asset_url", response.url)
             self.parameter_output_values["asset_url"] = response.url
+
+    async def aprocess(self) -> None:
+        self._process()

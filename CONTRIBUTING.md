@@ -22,35 +22,35 @@ Please refer to the [main CONTRIBUTING.md](https://github.com/griptape-ai/gripta
 
 1. **Find the library code** - All nodes for this library are located in:
 
-    ```
-    libraries/griptape_cloud/griptape_cloud/
-    ```
+   ```shell
+   libraries/griptape_cloud/griptape_cloud/
+   ```
 
-    Nodes are organized by cloud service domain:
+   Nodes are organized by cloud service domain:
 
-    - `assets/` - Asset management nodes
-    - `assistants/` - Assistant-related nodes
-    - `buckets/` - Cloud bucket operations
-    - `structures/` - Cloud structure nodes
-    - `publish_workflow/` - Workflow publishing
-    - `base/` - Base classes and utilities
-    - `mixins/` - Shared mixins
+   - `assets/` - Asset management nodes
+   - `assistants/` - Assistant-related nodes
+   - `buckets/` - Cloud bucket operations
+   - `structures/` - Cloud structure nodes
+   - `publish_workflow/` - Workflow publishing
+   - `base/` - Base classes and utilities
+   - `mixins/` - Shared mixins
 
 1. **Make your changes** - Follow the existing code structure and style in the library.
 
 1. **Run tests** - Test the library to ensure your changes work:
 
-    ```shell
-    # From the repository root
-    uv run pytest libraries/griptape_cloud/tests/
-    ```
+   ```shell
+   # From the repository root
+   uv run pytest libraries/griptape_cloud/tests/
+   ```
 
 1. **Follow code quality standards** - Run checks before submitting:
 
-    ```shell
-    make check  # Check linting, formatting, and type errors
-    make fix    # Auto-fix issues where possible
-    ```
+   ```shell
+   make check  # Check linting, formatting, and type errors
+   make fix    # Auto-fix issues where possible
+   ```
 
 1. **Submit a pull request** - Open a PR against the `main` branch of the [griptape-nodes](https://github.com/griptape-ai/griptape-nodes) repository.
 
@@ -68,29 +68,29 @@ Releases involve two steps: updating the version in the main repository, then pu
 
 1. Navigate to the library directory:
 
-    ```shell
-    cd libraries/griptape_cloud
-    ```
+   ```shell
+   cd libraries/griptape_cloud
+   ```
 
 1. Edit `griptape_nodes_library.json` and update the version in the metadata section:
 
-    ```json
-    {
-      "metadata": {
-        "library_version": "0.61.4"
-      }
-    }
-    ```
+   ```json
+   {
+     "metadata": {
+       "library_version": "0.61.4"
+     }
+   }
+   ```
 
 1. Commit and push:
 
-    ```shell
-    git add griptape_nodes_library.json
-    git commit -m "chore: bump griptape_cloud to v0.61.4"
-    git push origin main
-    ```
+   ```shell
+   git add griptape_nodes_library.json
+   git commit -m "chore: bump griptape_cloud to v0.61.4"
+   git push origin main
+   ```
 
-    This automatically syncs the changes to the public library repository.
+   This automatically syncs the changes to the public library repository.
 
 ### Step 2: Publish Release (in public library repo)
 
@@ -99,9 +99,9 @@ After the sync completes:
 1. Go to the [griptape-nodes-library-griptape-cloud](https://github.com/griptape-ai/griptape-nodes-library-griptape-cloud) repository on GitHub
 1. Navigate to Actions → "Publish Version"
 1. Run the workflow manually to:
-    - Create version tag (e.g., `v0.61.4`)
-    - Update `stable` tag
-    - Create GitHub release with auto-generated notes
+   - Create version tag (e.g., `v0.61.4`)
+   - Update `stable` tag
+   - Create GitHub release with auto-generated notes
 
 The library also has automated workflows:
 

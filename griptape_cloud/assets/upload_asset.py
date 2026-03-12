@@ -4,10 +4,10 @@ from typing import TYPE_CHECKING, cast
 
 import requests
 from griptape_cloud_client.models.assert_url_operation import AssertUrlOperation
+from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
+from griptape_nodes.exe_types.node_types import ControlNode
 
 from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
-from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
-from griptape_nodes.exe_types.node_types import AsyncResult, ControlNode
 
 if TYPE_CHECKING:
     from griptape_cloud_client.models.bucket_detail import BucketDetail
@@ -98,7 +98,7 @@ class UploadAsset(BaseGriptapeCloudNode, ControlNode):
         except Exception as e:
             exceptions.append(e)
 
-        return exceptions if exceptions else None
+        return exceptions or None
 
     def _process(self) -> None:
         bucket = cast("BucketDetail", self.get_parameter_value("bucket"))
@@ -128,5 +128,5 @@ class UploadAsset(BaseGriptapeCloudNode, ControlNode):
                 logger.error("Error uploading asset: %s", e)
                 raise
 
-    def process(self) -> AsyncResult[None]:
-        yield lambda: self._process()
+    async def aprocess(self) -> None:
+        self._process()

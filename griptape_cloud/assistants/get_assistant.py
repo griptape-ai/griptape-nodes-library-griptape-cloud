@@ -1,10 +1,11 @@
 import logging
 from typing import Any
 
-from griptape_cloud.assistants.assistant_options import AssistantOptions
-from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import DataNode
+
+from griptape_cloud.assistants.assistant_options import AssistantOptions
+from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
 
 logger = logging.getLogger("griptape_nodes")
 logger.setLevel(logging.INFO)
@@ -74,7 +75,7 @@ class GetAssistant(BaseGriptapeCloudNode, DataNode):
             exceptions.append(e)
 
         # if there are exceptions, they will display when the user tries to run the flow with the node.
-        return exceptions if exceptions else None
+        return exceptions or None
 
     def after_value_set(
         self, parameter: Parameter, value: Any, modified_parameters_set: set[str] | None = None
