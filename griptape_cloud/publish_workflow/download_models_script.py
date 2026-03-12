@@ -1,7 +1,7 @@
 import logging
 import shlex
 
-from huggingface_hub import hf_hub_download, snapshot_download, login, get_token
+from huggingface_hub import get_token, hf_hub_download, login, snapshot_download
 
 logging.basicConfig(
     level=logging.INFO,

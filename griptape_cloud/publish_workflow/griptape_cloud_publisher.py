@@ -800,7 +800,9 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                         temp_structure_config_path.read_text(encoding="utf-8"),
                     )
                 else:
-                    logger.info("GPU not enabled — structure_config.yaml left unmodified: %s", temp_structure_config_path)
+                    logger.info(
+                        "GPU not enabled — structure_config.yaml left unmodified: %s", temp_structure_config_path
+                    )
 
                 # Write the environment variables to the .env file
                 self._write_env_file(tmp_dir_path / ".env", env_file_mapping)
