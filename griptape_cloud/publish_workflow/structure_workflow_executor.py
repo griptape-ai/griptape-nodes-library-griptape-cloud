@@ -4,7 +4,6 @@ import os
 from griptape.artifacts import TextArtifact
 from griptape.drivers.event_listener.griptape_cloud_event_listener_driver import GriptapeCloudEventListenerDriver
 from griptape.events import FinishStructureRunEvent
-
 from griptape_nodes.bootstrap.workflow_executors.local_workflow_executor import LocalWorkflowExecutor
 
 

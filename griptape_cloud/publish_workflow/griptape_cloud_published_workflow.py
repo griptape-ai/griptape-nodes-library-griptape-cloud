@@ -6,6 +6,9 @@ from typing import Any
 
 from griptape_cloud_client.models.deployment_status import DeploymentStatus
 from griptape_cloud_client.types import Unset
+from griptape_nodes.exe_types.core_types import Parameter, ParameterGroup, ParameterMessage, ParameterMode
+from griptape_nodes.exe_types.node_types import SuccessFailureNode
+from griptape_nodes.exe_types.param_components.execution_status_component import ExecutionStatusComponent
 
 from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
 from griptape_cloud.publish_workflow.parameters.griptape_cloud_structure_config_parameter import (
@@ -14,9 +17,6 @@ from griptape_cloud.publish_workflow.parameters.griptape_cloud_structure_config_
 from griptape_cloud.publish_workflow.parameters.griptape_cloud_webhook_config_parameter import (
     GriptapeCloudWebhookConfigParameter,
 )
-from griptape_nodes.exe_types.core_types import Parameter, ParameterGroup, ParameterMessage, ParameterMode
-from griptape_nodes.exe_types.node_types import AsyncResult, SuccessFailureNode
-from griptape_nodes.exe_types.param_components.execution_status_component import ExecutionStatusComponent
 
 logger = logging.getLogger("griptape_nodes")
 logger.setLevel(logging.INFO)
@@ -145,10 +145,8 @@ class GriptapeCloudPublishedWorkflow(SuccessFailureNode, BaseGriptapeCloudNode):
             "   3. Open the resulting Workflow in the GUI, which will have the Griptape Cloud Published Workflow node configured"
         )
 
-    def process(
-        self,
-    ) -> AsyncResult[None]:
-        yield lambda: self._process()
+    async def aprocess(self) -> None:
+        self._process()
 
     def validate_before_workflow_run(self) -> list[Exception] | None:
         exceptions = super().validate_before_workflow_run() or []
@@ -177,7 +175,7 @@ class GriptapeCloudPublishedWorkflow(SuccessFailureNode, BaseGriptapeCloudNode):
             exceptions.append(e)
 
         # if there are exceptions, they will display when the user tries to run the flow with the node.
-        return exceptions if exceptions else None
+        return exceptions or None
 
     def _collect_input_parameters(self) -> dict[str, dict[str, Any]]:
         """Collect input parameters and structure them for the published workflow."""

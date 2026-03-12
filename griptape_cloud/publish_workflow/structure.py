@@ -20,8 +20,12 @@ logger = logging.getLogger("griptape_nodes")
 logger.setLevel(logging.INFO)
 
 load_dotenv()
+
+workspace_dir = Path(__file__).parent
+
 os.environ["GTN_CONFIG_STORAGE_BACKEND"] = "gtc"
 os.environ["GTN_ENABLE_WORKSPACE_FILE_WATCHING"] = "false"
+os.environ["GTN_CONFIG_WORKSPACE_DIRECTORY"] = str(workspace_dir)
 
 
 def _set_libraries(libraries: list[str]) -> None:
@@ -34,12 +38,12 @@ def _set_libraries(libraries: list[str]) -> None:
         value=False,
     )
     config_manager.set_config_value(
-        key=LIBRARIES_TO_REGISTER_KEY,
-        value=libraries,
+        key="workspace_directory",
+        value=str(workspace_dir),
     )
     config_manager.set_config_value(
-        key="workspace_directory",
-        value=str(Path(__file__).parent),
+        key=LIBRARIES_TO_REGISTER_KEY,
+        value=libraries,
     )
 
 
@@ -116,6 +120,14 @@ def _parse_argparse_args() -> tuple[dict, bool]:
     return flow_input, pickle_result
 
 
+# Set libraries before importing workflow so that library reloading
+# happens before the workflow is loaded
+_set_libraries(LIBRARIES)
+
+from griptape_nodes.drivers.storage import StorageBackend  # noqa: E402
+from structure_workflow_executor import StructureWorkflowExecutor  # noqa: E402
+from workflow import execute_workflow  # type: ignore[attr-defined]  # noqa: E402
+
 if __name__ == "__main__":
     if len(sys.argv) == WEBHOOK_MODE_ARGS_COUNT and not any(arg.startswith("-") for arg in sys.argv[1:]):
         raw_body = sys.argv[1]
@@ -125,14 +137,11 @@ if __name__ == "__main__":
     else:
         flow_input, pickle_result = _parse_argparse_args()
 
-    from structure_workflow_executor import StructureWorkflowExecutor
-    from workflow import execute_workflow  # type: ignore[attr-defined]
-
-    from griptape_nodes.drivers.storage import StorageBackend
-
     workflow_file_path = Path(__file__).parent / "workflow.py"
-    workflow_runner = StructureWorkflowExecutor(storage_backend=StorageBackend("gtc"))
-
-    _set_libraries(LIBRARIES)
+    workflow_runner = StructureWorkflowExecutor(
+        storage_backend=StorageBackend("gtc"),
+        skip_library_loading=True,
+        workflows_to_register=[workflow_file_path.as_posix()],
+    )
 
     execute_workflow(input=flow_input, workflow_executor=workflow_runner, pickle_control_flow_result=pickle_result)

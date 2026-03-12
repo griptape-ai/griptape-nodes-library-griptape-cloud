@@ -35,16 +35,6 @@ from griptape_cloud_client.models.structure_code_type_1 import StructureCodeType
 from griptape_cloud_client.models.update_structure_request_content import UpdateStructureRequestContent
 from griptape_cloud_client.models.update_structure_response_content import UpdateStructureResponseContent
 from griptape_cloud_client.models.webhook_input import WebhookInput
-from httpx import Client
-
-from griptape_cloud.mixins.griptape_cloud_api_mixin import GriptapeCloudApiMixin
-from griptape_cloud.publish_workflow import GRIPTAPE_CLOUD_LIBRARY_CONFIG_KEY
-from griptape_cloud.publish_workflow.griptape_cloud_start_flow import GriptapeCloudStartFlow
-from griptape_cloud.publish_workflow.griptape_cloud_workflow_builder import (
-    GriptapeCloudWebhookIntegration,
-    GriptapeCloudWorkflowBuilder,
-    GriptapeCloudWorkflowBuilderInput,
-)
 from griptape_nodes.node_library.library_registry import LibraryNameAndVersion, LibraryRegistry
 from griptape_nodes.node_library.workflow_registry import Workflow, WorkflowRegistry
 from griptape_nodes.retained_mode.events.app_events import (
@@ -88,10 +78,19 @@ from griptape_nodes.retained_mode.events.workflow_events import (
     SaveWorkflowResultSuccess,
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from httpx import Client
+
+from griptape_cloud.mixins.griptape_cloud_api_mixin import GriptapeCloudApiMixin
+from griptape_cloud.publish_workflow import GRIPTAPE_CLOUD_LIBRARY_CONFIG_KEY
+from griptape_cloud.publish_workflow.griptape_cloud_start_flow import GriptapeCloudStartFlow
+from griptape_cloud.publish_workflow.griptape_cloud_workflow_builder import (
+    GriptapeCloudWebhookIntegration,
+    GriptapeCloudWorkflowBuilder,
+    GriptapeCloudWorkflowBuilderInput,
+)
 
 if TYPE_CHECKING:
     from griptape_cloud_client.models.integration_config_union_type_2 import IntegrationConfigUnionType2
-
     from griptape_nodes.retained_mode.events.base_events import ResultPayload
     from griptape_nodes.retained_mode.managers.library_manager import LibraryManager
 
@@ -472,11 +471,7 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
         url = create_asset_url_response.url
         headers = create_asset_url_response.headers
         try:
-            response = self._client.put(
-                url=url,
-                headers=headers.to_dict(),
-                content=value,
-            )
+            response = self._client.put(url=url, headers=headers.to_dict(), content=value, timeout=60.0)
             response.raise_for_status()
         except Exception:
             msg = "Failed to upload file to data lake"
