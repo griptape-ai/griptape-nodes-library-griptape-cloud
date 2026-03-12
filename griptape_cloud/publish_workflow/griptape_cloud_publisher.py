@@ -476,6 +476,7 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                 url=url,
                 headers=headers.to_dict(),
                 content=value,
+                timeout=60,
             )
             response.raise_for_status()
         except Exception:
@@ -788,7 +789,24 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                     self._normalize_line_endings(temp_pre_build_install_script_path)
                 self._copy_file(post_build_install_script_path, temp_post_build_install_script_path)
                 self._normalize_line_endings(temp_post_build_install_script_path)
-                self._copy_file(structure_config_file_path, tmp_dir_path / "structure_config.yaml")
+                temp_structure_config_path = tmp_dir_path / "structure_config.yaml"
+                self._copy_file(structure_config_file_path, temp_structure_config_path)
+                if start_flow_node is not None and start_flow_node.get_parameter_value("gpu"):
+                    logger.info(
+                        "GPU enabled on Start Flow node — appending 'gpu: true' under [run] in structure_config.yaml: %s",
+                        temp_structure_config_path,
+                    )
+                    with temp_structure_config_path.open("a", encoding="utf-8", newline="\n") as f:
+                        existing = temp_structure_config_path.read_text(encoding="utf-8")
+                        if not existing.endswith("\n"):
+                            f.write("\n")
+                        f.write("  gpu: true\n")
+                    logger.debug(
+                        "structure_config.yaml contents after GPU modification:\n%s",
+                        temp_structure_config_path.read_text(encoding="utf-8"),
+                    )
+                else:
+                    logger.info("GPU not enabled — structure_config.yaml left unmodified: %s", temp_structure_config_path)
 
                 # Write the environment variables to the .env file
                 self._write_env_file(tmp_dir_path / ".env", env_file_mapping)
@@ -834,7 +852,12 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                     with temp_download_models_script_path.open("w", encoding="utf-8") as download_models_script_file:
                         download_models_script_file.write(download_models_script_contents)
                     with temp_post_build_install_script_path.open("a", encoding="utf-8", newline="\n") as f:
-                        f.write("\npython download_models_script.py\n")
+                        from huggingface_hub import get_token as hf_get_token
+
+                        hf_token = hf_get_token()
+                        if hf_token:
+                            f.write(f"\nexport HF_TOKEN='{hf_token}'\n")
+                        f.write("python download_models_script.py\n")
                     self._normalize_line_endings(temp_post_build_install_script_path)
 
                 with structure_file_path.open("r", encoding="utf-8") as structure_file:

@@ -1,8 +1,7 @@
 import logging
 import shlex
-import os
 
-from huggingface_hub import hf_hub_download, snapshot_download, login
+from huggingface_hub import hf_hub_download, snapshot_download, login, get_token
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,8 +20,15 @@ def download_models(commands: list[str]) -> None:
                 huggingface-cli download "repo_id"
                 huggingface-cli download "repo_id" "filename"
     """
-    token = os.environ.get("HF_TOKEN", "").strip()
-    login(token=token, add_to_git_credential=False)
+    token = get_token()
+    if token:
+        try:
+            login(token=token, add_to_git_credential=False)
+            logger.info("HuggingFace login succeeded")
+        except Exception as e:
+            logger.warning("HuggingFace login failed: %s", e)
+    else:
+        logger.warning("No HF token found — authenticated downloads will fail")
     for cmd in commands:
         logger.info("Executing: %s", cmd)
         match shlex.split(cmd):
