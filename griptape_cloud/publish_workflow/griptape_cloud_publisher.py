@@ -715,6 +715,7 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
 
     def _package_workflow(self, workflow_name: str, start_flow_node: GriptapeCloudStartFlow | None) -> str:  # noqa: PLR0915
         config_manager = GriptapeNodes.ConfigManager()
+        project_manager = GriptapeNodes.ProjectManager()
         secrets_manager = GriptapeNodes.SecretsManager()
         workflow = WorkflowRegistry.get_workflow_by_name(workflow_name)
 
@@ -897,7 +898,7 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                     "griptape_cloud_client @ git+https://github.com/griptape-ai/griptape-cloud-python-client.git@main"
                 )
 
-            archive_base_name = config_manager.workspace_path / workflow_name
+            archive_base_name = project_manager.workspace_path / workflow_name
             shutil.make_archive(str(archive_base_name), "zip", tmp_dir)
             return str(archive_base_name) + ".zip"
 

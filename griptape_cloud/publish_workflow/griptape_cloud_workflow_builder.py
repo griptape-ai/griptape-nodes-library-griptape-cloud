@@ -65,7 +65,7 @@ class GriptapeCloudWorkflowBuilder:
         self._execute_workflow_script(workflow_script)
 
         # Verify the workflow was created successfully
-        executor_workflow_path = GriptapeNodes.ConfigManager().workspace_path / (
+        executor_workflow_path = GriptapeNodes.ProjectManager().workspace_path / (
             self.workflow_builder_input.executor_workflow_name + ".py"
         )
         if not executor_workflow_path.exists():
