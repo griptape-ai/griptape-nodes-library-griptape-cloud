@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -26,6 +27,7 @@ workspace_dir = Path(__file__).parent
 os.environ["GTN_CONFIG_STORAGE_BACKEND"] = "gtc"
 os.environ["GTN_ENABLE_WORKSPACE_FILE_WATCHING"] = "false"
 os.environ["GTN_CONFIG_WORKSPACE_DIRECTORY"] = str(workspace_dir)
+os.environ.setdefault("CC", shutil.which("gcc") or shutil.which("cc") or "/usr/bin/gcc")
 
 
 def _set_libraries(libraries: list[str]) -> None:
