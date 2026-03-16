@@ -42,11 +42,11 @@ ignore = [
   "ANN003",  # Intentional
   "ANN401",  # Intentional
   "COM812",  # Intentional
-  "E501",    # TODO: https://github.com/griptape-ai/griptape-nodes/issues/834 
-  "D100",    # TODO: https://github.com/griptape-ai/griptape-nodes/issues/835 
+  "E501",    # TODO: https://github.com/griptape-ai/griptape-nodes/issues/834
+  "D100",    # TODO: https://github.com/griptape-ai/griptape-nodes/issues/835
   "BLE001",  # TODO: https://github.com/griptape-ai/griptape-nodes/issues/839
-  "B026",    # TODO: https://github.com/griptape-ai/griptape-nodes/issues/836 
-  "SLF001",  # TODO :https://github.com/griptape-ai/griptape-nodes/issues/838 
+  "B026",    # TODO: https://github.com/griptape-ai/griptape-nodes/issues/836
+  "SLF001",  # TODO :https://github.com/griptape-ai/griptape-nodes/issues/838
   "SIM108",  # Intentional
   "SIM110",  # Intentional
   "D105",    # Intentional
@@ -80,7 +80,8 @@ exclude = [
   "**/node_modules",
   "**/__pycache__",
   "**/.*",
-  "workflows/**"
+  "workflows/**",
+  "tests/**"
 ]
 pythonVersion = "3.12"
 reportIncompatibleMethodOverride = false
