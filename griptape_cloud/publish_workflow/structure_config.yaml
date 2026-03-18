@@ -10,6 +10,8 @@ build:
     watched_files: # List of files that will trigger a full rebuild of the Structure
       - requirements.txt
       - structure_config.yaml
+      - pre_build_install_script.sh
+      - post_build_install_script.sh
 run:
   main_file: structure.py
   run_as_module: true

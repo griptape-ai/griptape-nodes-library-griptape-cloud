@@ -66,13 +66,24 @@ class GriptapeCloudStartFlow(StartNode):
             )
         )
 
+        self.add_parameter(
+            Parameter(
+                name="gpu",
+                input_types=["bool"],
+                type="bool",
+                default_value=False,
+                tooltip="Enable GPU support for the published structure.",
+                allowed_modes={ParameterMode.PROPERTY},
+            )
+        )
+
     @classmethod
     def get_default_node_parameter_names(cls) -> list[str]:
         """Get the names of the parameters configured on the node by default."""
         params = []
         params.extend(GriptapeCloudStructureConfigParameter.get_param_names())
         params.extend(GriptapeCloudWebhookConfigParameter.get_param_names())
-        params.extend(["custom_install_script_path"])
+        params.extend(["custom_install_script_path", "gpu"])
         params.extend(["was_successful", "result_details"])
         params.extend(["exec_in", "exec_out", "failed"])
         return params

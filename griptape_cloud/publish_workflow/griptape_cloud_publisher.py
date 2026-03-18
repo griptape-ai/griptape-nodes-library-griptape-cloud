@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 from urllib.parse import urljoin
 
+import yaml
 from dotenv import set_key
 from dotenv.main import DotEnv
 from griptape_cloud_client.api.assets.create_asset import sync as create_asset
@@ -79,6 +80,7 @@ from griptape_nodes.retained_mode.events.workflow_events import (
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from httpx import Client
+from huggingface_hub import get_token as hf_get_token
 
 from griptape_cloud.mixins.griptape_cloud_api_mixin import GriptapeCloudApiMixin
 from griptape_cloud.publish_workflow import GRIPTAPE_CLOUD_LIBRARY_CONFIG_KEY
@@ -783,7 +785,26 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                     self._normalize_line_endings(temp_pre_build_install_script_path)
                 self._copy_file(post_build_install_script_path, temp_post_build_install_script_path)
                 self._normalize_line_endings(temp_post_build_install_script_path)
-                self._copy_file(structure_config_file_path, tmp_dir_path / "structure_config.yaml")
+                temp_structure_config_path = tmp_dir_path / "structure_config.yaml"
+                self._copy_file(structure_config_file_path, temp_structure_config_path)
+                if start_flow_node is not None and start_flow_node.get_parameter_value("gpu"):
+                    logger.info(
+                        "GPU enabled on Start Flow node — appending 'gpu: true' under [run] in structure_config.yaml: %s",
+                        temp_structure_config_path,
+                    )
+                    structure_config_data = yaml.safe_load(temp_structure_config_path.read_text(encoding="utf-8"))
+                    structure_config_data["run"]["gpu"] = True
+                    temp_structure_config_path.write_text(
+                        yaml.dump(structure_config_data, default_flow_style=False, sort_keys=False), encoding="utf-8"
+                    )
+                    logger.debug(
+                        "structure_config.yaml contents after GPU modification:\n%s",
+                        temp_structure_config_path.read_text(encoding="utf-8"),
+                    )
+                else:
+                    logger.info(
+                        "GPU not enabled — structure_config.yaml left unmodified: %s", temp_structure_config_path
+                    )
 
                 # Write the environment variables to the .env file
                 self._write_env_file(tmp_dir_path / ".env", env_file_mapping)
@@ -829,7 +850,10 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                     with temp_download_models_script_path.open("w", encoding="utf-8") as download_models_script_file:
                         download_models_script_file.write(download_models_script_contents)
                     with temp_post_build_install_script_path.open("a", encoding="utf-8", newline="\n") as f:
-                        f.write("\npython download_models_script.py\n")
+                        hf_token = hf_get_token()
+                        if hf_token:
+                            f.write(f"\nexport HF_TOKEN='{hf_token}'\n")
+                        f.write("python download_models_script.py\n")
                     self._normalize_line_endings(temp_post_build_install_script_path)
 
                 with structure_file_path.open("r", encoding="utf-8") as structure_file:
@@ -873,7 +897,7 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                     "griptape_cloud_client @ git+https://github.com/griptape-ai/griptape-cloud-python-client.git@main"
                 )
 
-            archive_base_name = config_manager.workspace_path / workflow_name
+            archive_base_name = Path(config_manager.get_config_value("workspace_directory")) / workflow_name
             shutil.make_archive(str(archive_base_name), "zip", tmp_dir)
             return str(archive_base_name) + ".zip"
 
