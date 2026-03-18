@@ -897,7 +897,7 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                     "griptape_cloud_client @ git+https://github.com/griptape-ai/griptape-cloud-python-client.git@main"
                 )
 
-            archive_base_name = config_manager.workspace_path / workflow_name
+            archive_base_name = Path(config_manager.get_config_value("workspace_directory")) / workflow_name
             shutil.make_archive(str(archive_base_name), "zip", tmp_dir)
             return str(archive_base_name) + ".zip"
 
