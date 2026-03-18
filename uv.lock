@@ -266,6 +266,7 @@ dependencies = [
     { name = "griptape-cloud-client" },
     { name = "griptape-nodes" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
@@ -286,6 +287,7 @@ requires-dist = [
     { name = "griptape-cloud-client", git = "https://github.com/griptape-ai/griptape-cloud-python-client?rev=main" },
     { name = "griptape-nodes", git = "https://github.com/griptape-ai/griptape-nodes?rev=main" },
     { name = "python-dotenv", specifier = "==1.1.1" },
+    { name = "pyyaml", specifier = ">=6.0" },
 ]
 
 [package.metadata.requires-dev]

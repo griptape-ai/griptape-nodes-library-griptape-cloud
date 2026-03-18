@@ -19,7 +19,7 @@
     "engine_version": "0.77.2",
     "tags": ["Griptape", "AI", "Cloud"],
     "dependencies": {
-      "pip_dependencies": ["griptape-cloud-client==0.1.1"]
+      "pip_dependencies": ["griptape-cloud-client==0.1.1", "pyyaml>=6.0"]
     }
   },
   "categories": [
