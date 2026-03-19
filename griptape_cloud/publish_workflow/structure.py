@@ -5,6 +5,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -28,6 +29,51 @@ os.environ["GTN_CONFIG_STORAGE_BACKEND"] = "gtc"
 os.environ["GTN_ENABLE_WORKSPACE_FILE_WATCHING"] = "false"
 os.environ["GTN_CONFIG_WORKSPACE_DIRECTORY"] = str(workspace_dir)
 os.environ.setdefault("CC", shutil.which("gcc") or shutil.which("cc") or "/usr/bin/gcc")
+
+
+def _apply_init_patch() -> None:
+    """Temp fix for infinite recursion during GriptapeNodes initialization.
+
+    Two bugs compound:
+    1. SingletonMeta saves the instance only AFTER __init__ completes, so any call
+       to get_instance() during __init__ tries to create a new instance → recursion.
+    2. SecretsManager.get_secret() eagerly evaluates str(self.workspace_env_path) as
+       a label string when building the search_order list, which calls ProjectManager(),
+       which calls get_instance() before _project_manager is assigned → recursion.
+
+    Patch 1: Save the singleton instance early (before __init__ completes) so that
+    recursive get_instance() calls return the partial instance instead of recursing.
+
+    Patch 2: workspace_env_path falls back to config_manager when _project_manager
+    isn't ready yet (AttributeError), so get_secret() can finish without recursing.
+    """
+    from griptape_nodes.retained_mode.managers.secrets_manager import SecretsManager
+    from griptape_nodes.utils.metaclasses import SingletonMeta
+
+    def _patched_singleton_call(cls: type, *args: Any, **kwargs: Any) -> Any:
+        if cls not in cls._instances:
+            instance = cls.__new__(cls, *args, **kwargs)
+            cls._instances[cls] = instance
+            try:
+                instance.__init__(*args, **kwargs)
+            except Exception:
+                del cls._instances[cls]
+                raise
+        return cls._instances[cls]
+
+    SingletonMeta.__call__ = _patched_singleton_call
+
+    original_workspace_env_path = SecretsManager.workspace_env_path.fget
+
+    def _safe_workspace_env_path(self: SecretsManager) -> Path:
+        try:
+            return original_workspace_env_path(self)  # type: ignore[misc]  # temp patch: fget may be None per property typing
+        except AttributeError:
+            # _project_manager not assigned yet during __init__; derive path from config
+            ws = Path(self.config_manager.merged_config.get("workspace_directory", ".")).resolve()
+            return ws / ".env"
+
+    SecretsManager.workspace_env_path = property(_safe_workspace_env_path)  # type: ignore[misc]  # temp patch: monkey-patching read-only property
 
 
 def _set_libraries(libraries: list[str]) -> None:
@@ -121,6 +167,9 @@ def _parse_argparse_args() -> tuple[dict, bool]:
 
     return flow_input, pickle_result
 
+
+# Patch singleton + secrets initialization order bug before triggering GriptapeNodes init
+_apply_init_patch()
 
 # Set libraries before importing workflow so that library reloading
 # happens before the workflow is loaded
