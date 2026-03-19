@@ -5,6 +5,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -49,7 +50,7 @@ def _apply_init_patch() -> None:
     from griptape_nodes.retained_mode.managers.secrets_manager import SecretsManager
     from griptape_nodes.utils.metaclasses import SingletonMeta
 
-    def _patched_singleton_call(cls, *args, **kwargs):
+    def _patched_singleton_call(cls: type, *args: Any, **kwargs: Any) -> Any:
         if cls not in cls._instances:
             instance = cls.__new__(cls, *args, **kwargs)
             cls._instances[cls] = instance
@@ -66,13 +67,13 @@ def _apply_init_patch() -> None:
 
     def _safe_workspace_env_path(self: SecretsManager) -> Path:
         try:
-            return original_workspace_env_path(self)
+            return original_workspace_env_path(self)  # type: ignore[misc]  # temp patch: fget may be None per property typing
         except AttributeError:
             # _project_manager not assigned yet during __init__; derive path from config
             ws = Path(self.config_manager.merged_config.get("workspace_directory", ".")).resolve()
             return ws / ".env"
 
-    SecretsManager.workspace_env_path = property(_safe_workspace_env_path)
+    SecretsManager.workspace_env_path = property(_safe_workspace_env_path)  # type: ignore[misc]  # temp patch: monkey-patching read-only property
 
 
 def _set_libraries(libraries: list[str]) -> None:
