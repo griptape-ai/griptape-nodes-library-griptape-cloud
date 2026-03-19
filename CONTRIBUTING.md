@@ -1,115 +1,111 @@
-# Contributing to Griptape Cloud Library
-
-We welcome contributions to the Griptape Cloud Library! This library provides nodes for Griptape Cloud-specific operations including asset management, assistants, buckets, and workflow publishing.
-
-## Development Location
-
-**IMPORTANT**: For now, all development for this library happens in the main [griptape-nodes](https://github.com/griptape-ai/griptape-nodes) repository under the `libraries/griptape_cloud/` directory.
-
-This library is automatically synced to the public [griptape-nodes-library-griptape-cloud](https://github.com/griptape-ai/griptape-nodes-library-griptape-cloud) repository when changes are pushed to the `main` branch.
+# Contributing
 
 ## Development Setup
 
-Please refer to the [main CONTRIBUTING.md](https://github.com/griptape-ai/griptape-nodes/blob/main/CONTRIBUTING.md) in the griptape-nodes repository for:
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management. Install dev dependencies with:
 
-- Installing `uv` and setting up your development environment
-- Installing dependencies with `uv sync --all-groups --all-extras`
-- Code style guidelines (Ruff, Pyright)
-- Running checks with `make check` and `make fix`
-- General contribution workflow
+```bash
+make install/dev
+```
 
-## Contributing Code
+To install all dependencies including core and extras:
 
-1. **Find the library code** - All nodes for this library are located in:
+```bash
+make install
+```
 
-   ```shell
-   libraries/griptape_cloud/griptape_cloud/
+## Makefile Targets
+
+Run `make` with no arguments to see all available targets.
+
+### Checks
+
+Run all checks (format, lint, types) before submitting a PR:
+
+```bash
+make check
+```
+
+Individual checks:
+
+```bash
+make check/format   # ruff format --check
+make check/lint     # ruff check
+make check/types    # pyright
+```
+
+### Fixing Issues
+
+Auto-fix formatting and linting issues:
+
+```bash
+make fix
+```
+
+### Dependency Sync
+
+The `pip_dependencies` field in the library JSON is kept in sync with `pyproject.toml`. Run this after adding or removing dependencies:
+
+```bash
+make deps/sync
+```
+
+This is also run automatically as part of `make install/core` and `make install/all`.
+
+## CI
+
+The CI workflow runs `make check` on every pull request and push to `main`. PRs must pass all checks before merging.
+
+## Releases
+
+Library versions follow [semantic versioning](https://semver.org/). The version is stored in the library JSON file under `metadata.library_version`.
+
+To check the current version:
+
+```bash
+make version/get
+```
+
+To set a specific version:
+
+```bash
+make version/set v=1.2.3
+```
+
+### Regular Release
+
+1. Merge your changes to `main`.
+
+2. Run **Actions > Version Bump (Patch)** or **Actions > Version Bump (Minor)** on `main`. This increments the version in the library JSON and commits the change.
+
+   Or bump locally and push:
+
+   ```bash
+   make version/patch   # 1.2.3 → 1.2.4
+   make version/minor   # 1.2.3 → 1.3.0
+   make version/major   # 1.2.3 → 2.0.0
    ```
 
-   Nodes are organized by cloud service domain:
+3. Run **Actions > Version Publish** on `main`. This creates and pushes the version tag (e.g. `v1.2.3`), updates the `stable` tag, and creates a GitHub release with auto-generated release notes.
 
-   - `assets/` - Asset management nodes
-   - `assistants/` - Assistant-related nodes
-   - `buckets/` - Cloud bucket operations
-   - `structures/` - Cloud structure nodes
-   - `publish_workflow/` - Workflow publishing
-   - `base/` - Base classes and utilities
-   - `mixins/` - Shared mixins
+### Patch Release
 
-1. **Make your changes** - Follow the existing code structure and style in the library.
+To release a fix without including all commits on `main`, use a release branch:
 
-1. **Run tests** - Test the library to ensure your changes work:
+1. Create a branch from the tag you want to patch:
 
-   ```shell
-   # From the repository root
-   uv run pytest libraries/griptape_cloud/tests/
+   ```bash
+   git checkout -b release/v0.50 v0.50.0
+   git push -u origin release/v0.50
    ```
 
-1. **Follow code quality standards** - Run checks before submitting:
+2. Cherry-pick the fix commit(s) you want to include:
 
-   ```shell
-   make check  # Check linting, formatting, and type errors
-   make fix    # Auto-fix issues where possible
+   ```bash
+   git cherry-pick <commit-sha>
+   git push
    ```
 
-1. **Submit a pull request** - Open a PR against the `main` branch of the [griptape-nodes](https://github.com/griptape-ai/griptape-nodes) repository.
+3. Run **Actions > Version Bump (Patch)** and set the branch to `release/v0.50`.
 
-## Syncing to Public Repository
-
-When changes are merged to the `main` branch in the griptape-nodes repository, they automatically sync to the public [griptape-nodes-library-griptape-cloud](https://github.com/griptape-ai/griptape-nodes-library-griptape-cloud) repository via GitHub Actions.
-
-You don't need to do anything special for this sync to happen - it's automatic.
-
-## Making a Release (Maintainers)
-
-Releases involve two steps: updating the version in the main repository, then publishing from the synced library repository.
-
-### Step 1: Update Version (in main griptape-nodes repo)
-
-1. Navigate to the library directory:
-
-   ```shell
-   cd libraries/griptape_cloud
-   ```
-
-1. Edit `griptape_nodes_library.json` and update the version in the metadata section:
-
-   ```json
-   {
-     "metadata": {
-       "library_version": "0.61.4"
-     }
-   }
-   ```
-
-1. Commit and push:
-
-   ```shell
-   git add griptape_nodes_library.json
-   git commit -m "chore: bump griptape_cloud to v0.61.4"
-   git push origin main
-   ```
-
-   This automatically syncs the changes to the public library repository.
-
-### Step 2: Publish Release (in public library repo)
-
-After the sync completes:
-
-1. Go to the [griptape-nodes-library-griptape-cloud](https://github.com/griptape-ai/griptape-nodes-library-griptape-cloud) repository on GitHub
-1. Navigate to Actions → "Publish Version"
-1. Run the workflow manually to:
-   - Create version tag (e.g., `v0.61.4`)
-   - Update `stable` tag
-   - Create GitHub release with auto-generated notes
-
-The library also has automated workflows:
-
-- `version-bump-patch.yml` / `version-bump-minor.yml` - Can bump versions (but currently versions are managed in main repo)
-- `nightly-release.yml` - Creates nightly prerelease builds automatically
-
-## Questions or Issues?
-
-For questions about contributing, please open an issue in the [griptape-nodes](https://github.com/griptape-ai/griptape-nodes) repository.
-
-Thank you for contributing!
+4. Run **Actions > Version Publish** and set the branch to `release/v0.50`.
