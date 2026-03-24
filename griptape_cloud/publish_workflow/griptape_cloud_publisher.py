@@ -853,6 +853,8 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                         hf_token = hf_get_token()
                         if hf_token:
                             f.write(f"\nexport HF_TOKEN='{hf_token}'\n")
+                        else:
+                            f.write("\n")
                         f.write("python download_models_script.py\n")
                     self._normalize_line_endings(temp_post_build_install_script_path)
 
