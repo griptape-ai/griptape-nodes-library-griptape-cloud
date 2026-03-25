@@ -200,9 +200,10 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
                 logger.debug("Failed to resolve macro '%s': %s", macro_string, result.result_details)
                 return None
 
-            # Return the absolute path from the result payload
-            # The payload contains the resolved path as a Path object
-            return Path(result.payload) if result.payload else None
+            # Return the absolute path from the result
+            # The result object contains the resolved path
+            # Type ignore needed due to ResultPayload not exposing attributes in type hints
+            return Path(result.payload) if result.payload else None  # type: ignore[attr-defined]
 
         except MacroSyntaxError as e:
             # Not a valid macro syntax
