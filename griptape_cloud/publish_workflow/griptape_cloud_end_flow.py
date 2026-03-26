@@ -37,19 +37,19 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
         EndNode.__init__(self, name, metadata)
         BaseGriptapeCloudNode.__init__(self, name, metadata=metadata)
 
-    def process(self) -> None:
+    async def aprocess(self) -> None:
         """Process the End Flow node, uploading any output files to Griptape Cloud.
 
         This method processes all parameters to detect macro strings, uploads referenced
         files to Griptape Cloud, and replaces the macro strings with presigned URLs.
         """
         # First, process any file uploads before calling parent process()
-        self._process_output_files()
+        await self._process_output_files()
 
         # Call parent class process() to handle normal End Flow logic
         super().process()
 
-    def _process_output_files(self) -> None:
+    async def _process_output_files(self) -> None:
         """Process all parameters to upload files referenced by macro strings.
 
         This method:
@@ -73,7 +73,7 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
                     param_value = self.get_parameter_value(param.name)
 
                     # Process the parameter value to upload files and substitute URLs
-                    updated_value = self._process_parameter_value(param_value, bucket_id)
+                    updated_value = await self._process_parameter_value(param_value, bucket_id)
 
                     # If the value was updated, set it back to the parameter
                     if updated_value != param_value:
@@ -89,7 +89,7 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
             # Log error but don't fail the node - file upload is optional
             logger.error("Error processing output files for End Flow: %s", e)
 
-    def _process_parameter_value(self, value: Any, bucket_id: str) -> Any:
+    async def _process_parameter_value(self, value: Any, bucket_id: str) -> Any:
         """Recursively process a parameter value to upload files and substitute URLs.
 
         This method handles different value types:
@@ -112,21 +112,24 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
         if isinstance(value, dict):
             processed_dict = {}
             for key, val in value.items():
-                processed_dict[key] = self._process_parameter_value(val, bucket_id)
+                processed_dict[key] = await self._process_parameter_value(val, bucket_id)
             return processed_dict
 
         # Handle list values
         if isinstance(value, list):
-            return [self._process_parameter_value(item, bucket_id) for item in value]
+            result = []
+            for item in value:
+                result.append(await self._process_parameter_value(item, bucket_id))
+            return result
 
         # Handle string values that might contain macro strings
         if isinstance(value, str):
-            return self._process_string_value(value, bucket_id)
+            return await self._process_string_value(value, bucket_id)
 
         # Return other types unchanged
         return value
 
-    def _process_string_value(self, value: str, bucket_id: str) -> str:
+    async def _process_string_value(self, value: str, bucket_id: str) -> str:
         """Process a string value to detect and replace macro strings with presigned URLs.
 
         Args:
@@ -155,7 +158,7 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
                 return value
 
             # File exists! Upload it to Griptape Cloud
-            presigned_url = self._upload_file_and_get_url(file_path, bucket_id)
+            presigned_url = await self._upload_file_and_get_url(file_path, bucket_id)
 
         except Exception as e:
             # Log error but return original value
@@ -213,7 +216,7 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
             logger.error("Error resolving macro '%s': %s", macro_string, e)
             return None
 
-    def _upload_file_and_get_url(self, file_path: Path, bucket_id: str) -> str | None:
+    async def _upload_file_and_get_url(self, file_path: Path, bucket_id: str) -> str | None:
         """Upload a file to Griptape Cloud and get a presigned URL.
 
         This method follows the same pattern as GriptapeCloudStorageDriver:
@@ -251,8 +254,9 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
             upload_url = upload_response.url
             upload_headers = upload_response.headers.to_dict() if hasattr(upload_response.headers, "to_dict") else {}
 
-            response = httpx.put(upload_url, content=file_content, headers=upload_headers, timeout=60.0)
-            response.raise_for_status()
+            async with httpx.AsyncClient() as client:
+                response = await client.put(upload_url, content=file_content, headers=upload_headers, timeout=60.0)
+                response.raise_for_status()
 
             logger.debug("Successfully uploaded file '%s' to Griptape Cloud", file_path.name)
 
