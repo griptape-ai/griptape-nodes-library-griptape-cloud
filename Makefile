@@ -1,4 +1,5 @@
 SHELL := /bin/bash
+MAKEFLAGS += --no-print-directory
 
 LIBRARY_JSON := griptape_nodes_library.json
 
