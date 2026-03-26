@@ -644,14 +644,55 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
 
         return library_paths
 
-    def __get_install_source(self) -> tuple[Literal["git", "file", "pypi"], str | None]:
+    def _find_griptape_nodes_distribution(self) -> importlib.metadata.Distribution | None:
+        """Find the griptape_nodes distribution from the current executable's venv.
+
+        Uses sys.executable to derive the venv site-packages path, scoping the
+        search to avoid picking up distributions from other venvs that may have
+        leaked onto sys.path via dynamic library loading.
+
+        Returns:
+            The Distribution object for griptape_nodes, or None if not found.
+        """
+        import sys
+
+        # Derive venv site-packages from sys.executable (without resolving symlinks,
+        # which would follow through to the system Python).
+        exe_path = Path(sys.executable)
+        venv_root = exe_path.parent.parent
+        site_packages = venv_root / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+
+        if not site_packages.exists():
+            logger.debug("Venv site-packages not found at %s, falling back to default lookup", site_packages)
+            try:
+                return importlib.metadata.distribution("griptape_nodes")
+            except importlib.metadata.PackageNotFoundError:
+                return None
+
+        logger.debug("Searching for griptape_nodes in venv site-packages: %s", site_packages)
+        for dist in importlib.metadata.distributions(path=[str(site_packages)]):
+            if dist.metadata["Name"] == "griptape-nodes":
+                logger.debug("Found griptape_nodes at %s", dist.locate_file(""))
+                return dist
+
+        logger.debug("griptape_nodes not found in venv site-packages, falling back to default lookup")
+        try:
+            return importlib.metadata.distribution("griptape_nodes")
+        except importlib.metadata.PackageNotFoundError:
+            return None
+
+    def _get_install_source(self) -> tuple[Literal["git", "file", "pypi"], str | None]:
         """Determines the install source of the Griptape Nodes package.
 
         Returns:
             tuple: A tuple containing the install source and commit ID (if applicable).
         """
-        dist = importlib.metadata.distribution("griptape_nodes")
+        dist = self._find_griptape_nodes_distribution()
+        if dist is None:
+            logger.info("Could not find griptape_nodes distribution, assuming pypi install")
+            return "pypi", None
         direct_url_text = dist.read_text("direct_url.json")
+        logger.debug("griptape_nodes direct_url.json: %s", direct_url_text)
         # installing from pypi doesn't have a direct_url.json file
         if direct_url_text is None:
             logger.debug("No direct_url.json file found, assuming pypi install")
@@ -659,10 +700,13 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
 
         direct_url_info = json.loads(direct_url_text)
         url = direct_url_info.get("url")
+        logger.debug("griptape_nodes install URL: %s", url)
         if url.startswith("file://"):
             try:
                 pkg_dir = Path(str(dist.locate_file(""))).resolve()
+                logger.debug("Package directory: %s", pkg_dir)
                 git_root = next(p for p in (pkg_dir, *pkg_dir.parents) if (p / ".git").is_dir())
+                logger.debug("Git root found: %s", git_root)
                 commit = (
                     subprocess.check_output(
                         ["git", "rev-parse", "--short", "HEAD"],  # noqa: S607
@@ -672,17 +716,18 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                     .decode()
                     .strip()
                 )
-            except (StopIteration, subprocess.CalledProcessError):
-                logger.debug("File URL but no git repo → file")
+            except (StopIteration, subprocess.CalledProcessError) as e:
+                logger.info("File URL but no git repo or git command failed: %s", e)
                 return "file", None
             else:
-                logger.debug("Detected git repo at %s (commit %s)", git_root, commit)
+                logger.info("Detected git install source at %s (commit %s)", git_root, commit)
                 return "git", commit
         if "vcs_info" in direct_url_info:
-            logger.debug("Detected git repo at %s", url)
-            return "git", direct_url_info["vcs_info"].get("commit_id")[:7]
+            commit_id = direct_url_info["vcs_info"].get("commit_id", "")[:7]
+            logger.info("Detected vcs_info git install source at %s (commit %s)", url, commit_id)
+            return "git", commit_id
         # Fall back to pypi if no other source is found
-        logger.debug("Failed to detect install source, assuming pypi")
+        logger.info("No install source detected, assuming pypi")
         return "pypi", None
 
     def _get_merged_env_file_mapping(self, workspace_env_file_path: Path) -> dict[str, Any]:
@@ -887,7 +932,7 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                 raise
 
             # Create the requirements.txt file using the correct engine version
-            source, commit_id = self.__get_install_source()
+            source, commit_id = self._get_install_source()
             if source == "git" and commit_id is not None:
                 engine_version = commit_id
             requirements_file_path = tmp_dir_path / "requirements.txt"
