@@ -118,9 +118,7 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
 
         # Handle list values
         if isinstance(value, list):
-            return await asyncio.gather(
-                *[self._process_parameter_value(item, bucket_id) for item in value]
-            )
+            return await asyncio.gather(*[self._process_parameter_value(item, bucket_id) for item in value])
 
         # Handle string values that might contain macro strings
         if isinstance(value, str):
