@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from pathlib import Path
@@ -117,10 +118,9 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
 
         # Handle list values
         if isinstance(value, list):
-            result = []
-            for item in value:
-                result.append(await self._process_parameter_value(item, bucket_id))
-            return result
+            return await asyncio.gather(
+                *[self._process_parameter_value(item, bucket_id) for item in value]
+            )
 
         # Handle string values that might contain macro strings
         if isinstance(value, str):
