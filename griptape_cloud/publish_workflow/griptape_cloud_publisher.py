@@ -132,7 +132,8 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
             validation_exceptions = self._validate_before_publish()
             if validation_exceptions:
                 return PublishWorkflowResultFailure(
-                    result_details=self._get_result_details_for_exceptions(validation_exceptions)
+                    result_details=self._get_result_details_for_exceptions(validation_exceptions),
+                    exception=Exception("Validation failed before publishing workflow."),
                 )
 
             # Get the workflow shape
@@ -185,6 +186,7 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
             logger.error(details)
             return PublishWorkflowResultFailure(
                 result_details=details,
+                exception=e,
             )
 
     @classmethod
