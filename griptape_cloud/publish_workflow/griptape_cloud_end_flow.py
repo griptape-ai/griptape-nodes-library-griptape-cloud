@@ -1,29 +1,48 @@
 import asyncio
 import logging
-import re
 from pathlib import Path
 from typing import Any
 
 import httpx
+from griptape_cloud_client.client import AuthenticatedClient
 from griptape_cloud_client.models.assert_url_operation import AssertUrlOperation
-from griptape_nodes.common.macro_parser import MacroSyntaxError, ParsedMacro
+from griptape_nodes.common.macro_parser import ParsedMacro
 from griptape_nodes.exe_types.node_types import EndNode
+from griptape_nodes.retained_mode.events.os_events import (
+    GetFileInfoRequest,
+    GetFileInfoResultSuccess,
+)
+from griptape_nodes.retained_mode.events.project_events import (
+    GetCurrentProjectRequest,
+    GetCurrentProjectResultSuccess,
+    GetPathForMacroRequest,
+    GetPathForMacroResultSuccess,
+    GetSituationRequest,
+    GetSituationResultSuccess,
+)
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
-from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
+from griptape_cloud.base.base_griptape_cloud_node import (
+    API_KEY_ENV_VAR,
+    DEFAULT_GRIPTAPE_CLOUD_ENDPOINT,
+)
+from griptape_cloud.mixins.griptape_cloud_api_mixin import GriptapeCloudApiMixin
 
 logger = logging.getLogger("griptape_nodes")
 
+METADATA_SITUATION_NAME = "save_griptape_nodes_metadata"
 
-class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
+
+class GriptapeCloudEndFlow(EndNode, GriptapeCloudApiMixin):
     """End Flow node that uploads project output files to Griptape Cloud.
 
     This node extends the base EndNode to handle publishing workflow outputs.
-    When parameters contain macro strings (e.g., {outputs}/file.jpg), this node:
-    1. Resolves the macro to the actual file path using ProjectManager
+    When parameters contain file paths that have corresponding metadata sidecar
+    files (created by the project macro system), this node:
+    1. Detects the file by checking for its metadata sidecar in the metadata directory
     2. Uploads the file to Griptape Cloud storage
     3. Generates a presigned URL for the uploaded file
-    4. Substitutes the original macro string with the presigned URL
+    4. Substitutes the original file path with the presigned URL
     """
 
     def __init__(
@@ -34,31 +53,38 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
         if metadata is None:
             metadata = {}
         metadata["showaddparameter"] = True
-        # Initialize both parent classes
-        EndNode.__init__(self, name, metadata)
-        BaseGriptapeCloudNode.__init__(self, name, metadata=metadata)
+        super().__init__(name, metadata)
+
+        # Set up the Griptape Cloud API client (from GriptapeCloudApiMixin)
+        api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR) or ""
+        self.gtc_client = AuthenticatedClient(
+            base_url=DEFAULT_GRIPTAPE_CLOUD_ENDPOINT,
+            token=api_key,
+            verify_ssl=False,
+        )
 
     async def aprocess(self) -> None:
         """Process the End Flow node, uploading any output files to Griptape Cloud.
 
-        This method processes all parameters to detect macro strings, uploads referenced
-        files to Griptape Cloud, and replaces the macro strings with presigned URLs.
+        This method processes all parameters to detect files with metadata sidecars,
+        uploads them to Griptape Cloud, and replaces file paths with presigned URLs.
         """
-        # First, process any file uploads before calling parent process()
-        await self._process_output_files()
+        # Only upload assets when running inside a Griptape Cloud worker
+        if self.is_executing_in_structure_runtime():
+            await self._process_output_files()
 
         # Call parent class process() to handle normal End Flow logic
         super().process()
 
     async def _process_output_files(self) -> None:
-        """Process all parameters to upload files referenced by macro strings.
+        """Process all parameters to upload files that have metadata sidecars.
 
         This method:
-        1. Iterates through all parameters
-        2. Detects macro strings in parameter values
-        3. Resolves macros to file paths
+        1. Resolves the metadata directory and project base directory
+        2. Iterates through all parameters
+        3. Detects files with metadata sidecars
         4. Uploads files to Griptape Cloud
-        5. Substitutes macro strings with presigned URLs
+        5. Substitutes file paths with presigned URLs
         """
         try:
             # Get bucket ID from secrets
@@ -67,14 +93,27 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
                 logger.warning("GT_CLOUD_BUCKET_ID not set, skipping file upload for End Flow")
                 return
 
-            # Process all parameters that might contain macro strings
+            # Resolve metadata directory and project base directory once
+            metadata_dir = self._resolve_metadata_dir()
+            if metadata_dir is None:
+                logger.warning("Could not resolve metadata directory, skipping file upload")
+                return
+
+            project_base_dir = self._resolve_project_base_dir()
+            if project_base_dir is None:
+                logger.warning("Could not resolve project base directory, skipping file upload")
+                return
+
+            # Process all parameters that might contain file paths
             for param in self.parameters:
                 try:
                     # Get the current parameter value
                     param_value = self.get_parameter_value(param.name)
 
                     # Process the parameter value to upload files and substitute URLs
-                    updated_value = await self._process_parameter_value(param_value, bucket_id)
+                    updated_value = await self._process_parameter_value(
+                        param_value, bucket_id, metadata_dir, project_base_dir
+                    )
 
                     # If the value was updated, set it back to the parameter
                     if updated_value != param_value:
@@ -90,20 +129,24 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
             # Log error but don't fail the node - file upload is optional
             logger.error("Error processing output files for End Flow: %s", e)
 
-    async def _process_parameter_value(self, value: Any, bucket_id: str) -> Any:
+    async def _process_parameter_value(
+        self, value: Any, bucket_id: str, metadata_dir: Path, project_base_dir: Path
+    ) -> Any:
         """Recursively process a parameter value to upload files and substitute URLs.
 
         This method handles different value types:
-        - Strings: Check for macro strings and upload if file exists
+        - Strings: Check for metadata sidecar and upload if file exists
         - Dicts: Recursively process all values
         - Lists: Recursively process all items
 
         Args:
             value: The parameter value to process
             bucket_id: The Griptape Cloud bucket ID
+            metadata_dir: The absolute path to the metadata sidecar directory
+            project_base_dir: The absolute path to the project base directory
 
         Returns:
-            The processed value with macro strings replaced by presigned URLs
+            The processed value with file paths replaced by presigned URLs
         """
         # Handle None values
         if value is None:
@@ -113,119 +156,215 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
         if isinstance(value, dict):
             processed_dict = {}
             for key, val in value.items():
-                processed_dict[key] = await self._process_parameter_value(val, bucket_id)
+                processed_dict[key] = await self._process_parameter_value(
+                    val, bucket_id, metadata_dir, project_base_dir
+                )
             return processed_dict
 
         # Handle list values
         if isinstance(value, list):
-            return await asyncio.gather(*[self._process_parameter_value(item, bucket_id) for item in value])
+            return await asyncio.gather(
+                *[self._process_parameter_value(item, bucket_id, metadata_dir, project_base_dir) for item in value]
+            )
 
-        # Handle string values that might contain macro strings
+        # Handle string values that might contain file paths
         if isinstance(value, str):
-            return await self._process_string_value(value, bucket_id)
+            return await self._process_string_value(value, bucket_id, metadata_dir, project_base_dir)
+
+        # Handle objects with a string "value" attribute (e.g., ImageUrlArtifact, UrlArtifact)
+        inner = getattr(value, "value", None)
+        if isinstance(inner, str):
+            updated_inner = await self._process_string_value(inner, bucket_id, metadata_dir, project_base_dir)
+            if updated_inner != inner:
+                value.value = updated_inner
+            return value
 
         # Return other types unchanged
         return value
 
-    async def _process_string_value(self, value: str, bucket_id: str) -> str:
-        """Process a string value to detect and replace macro strings with presigned URLs.
+    async def _process_string_value(
+        self, value: str, bucket_id: str, metadata_dir: Path, project_base_dir: Path
+    ) -> str:
+        """Process a string value: resolve as a macro path, check for a metadata sidecar, upload, and replace.
+
+        Any string parameter value might be a macro path (e.g. ``{outputs}/file.jpg``
+        or even a plain path). This method attempts to resolve it, then checks for
+        a metadata sidecar to confirm the file was produced by the project macro
+        system before uploading.
 
         Args:
-            value: The string value that might contain a macro string
+            value: The string value to process
             bucket_id: The Griptape Cloud bucket ID
+            metadata_dir: The absolute path to the metadata sidecar directory
+            project_base_dir: The absolute path to the project base directory
 
         Returns:
-            The original value if no macro found, or the presigned URL if file was uploaded
+            The original value if not a sidecar-tracked file, or the presigned URL if uploaded
         """
-        # Check if the string contains a macro pattern (e.g., {outputs}/file.jpg)
-        # Macro pattern: starts with {variable_name} followed by optional path
-        macro_pattern = r"^(\{[^}]+\})(.*)$"
-        match = re.match(macro_pattern, value)
-
-        if not match:
-            # Not a macro string, return unchanged
-            return value
-
         try:
-            # Attempt to resolve the macro to an actual file path
+            # Attempt to resolve the value as a macro path
             file_path = self._resolve_macro_to_path(value)
+            if file_path is None:
+                return value
+            logger.debug("Resolved macro '%s' to path: %s", value, file_path)
 
-            if file_path is None or not file_path.exists():
-                # Macro resolved but file doesn't exist, return original value
-                logger.debug("Macro '%s' resolved but file does not exist at: %s", value, file_path)
+            # Verify the resolved path points to an existing file
+            if not self._is_existing_file(file_path):
+                logger.debug("Resolved path '%s' does not exist or is not a file", file_path)
                 return value
 
-            # File exists! Upload it to Griptape Cloud
-            presigned_url = await self._upload_file_and_get_url(file_path, bucket_id)
+            # Check for metadata sidecar to confirm this was produced by the macro system
+            if not self._has_metadata_sidecar(file_path, metadata_dir, project_base_dir):
+                logger.debug("No metadata sidecar found for '%s'", file_path)
+                return value
+
+            # File confirmed as macro output with sidecar — upload it
+            presigned_url = await self._upload_file_and_get_url(file_path, bucket_id, project_base_dir)
 
         except Exception as e:
-            # Log error but return original value
-            logger.error("Error processing macro string '%s': %s", value, e)
+            logger.error("Error processing value '%s': %s", value, e)
             return value
         else:
             if presigned_url:
-                logger.info("Uploaded file '%s' from macro '%s' to Griptape Cloud", file_path, value)
+                logger.info("Uploaded file '%s' to Griptape Cloud", file_path)
                 return presigned_url
-            logger.warning("Failed to upload file '%s' from macro '%s'", file_path, value)
+            logger.warning("Failed to upload file '%s'", file_path)
             return value
 
     def _resolve_macro_to_path(self, macro_string: str) -> Path | None:
-        """Resolve a macro string to an actual file path using ProjectManager.
+        """Resolve a macro string to an absolute file path.
 
-        Uses the ProjectManager to resolve macro strings like {outputs}/file.jpg
-        to actual file system paths.
+        Uses ``GetPathForMacroRequest`` to resolve macro strings like
+        ``{outputs}/file.jpg`` to absolute filesystem paths.
 
         Args:
-            macro_string: The macro string to resolve (e.g., "{outputs}/file.jpg")
+            macro_string: The macro string to resolve
 
         Returns:
-            The resolved Path object, or None if resolution fails
+            The resolved absolute Path, or None if resolution fails.
         """
         try:
-            # Parse the macro string to validate syntax
             parsed_macro = ParsedMacro(macro_string)
+            result = GriptapeNodes.handle_request(GetPathForMacroRequest(parsed_macro=parsed_macro, variables={}))
+            if not isinstance(result, GetPathForMacroResultSuccess):
+                return None
+        except Exception:
+            return None
+        else:
+            return result.absolute_path
 
-            # Import here to avoid circular dependencies
-            from griptape_nodes.retained_mode.events.project_events import GetPathForMacroRequest
+    def _is_existing_file(self, file_path: Path) -> bool:
+        """Check if a path points to an existing file using the OS event system.
 
-            # Use ProjectManager to resolve the macro to an absolute path
-            request = GetPathForMacroRequest(
-                parsed_macro=parsed_macro,
-                variables={},  # No additional variables needed for output macros
-            )
+        Args:
+            file_path: The absolute path to check.
 
-            result = GriptapeNodes.handle_request(request)
+        Returns:
+            True if the path exists and is a file.
+        """
+        result = GriptapeNodes.handle_request(GetFileInfoRequest(path=str(file_path), workspace_only=False))
+        if not isinstance(result, GetFileInfoResultSuccess) or result.file_entry is None:
+            return False
+        return not result.file_entry.is_dir
 
-            # Check if resolution was successful
-            if result.failed():
-                logger.debug("Failed to resolve macro '%s': %s", macro_string, result.result_details)
+    def _get_metadata_dir_name(self) -> str | None:
+        """Return the logical metadata directory name from the current project.
+
+        Uses ``GetSituationRequest`` to look up the ``save_griptape_nodes_metadata``
+        situation, then extracts the leading ``{directory}`` macro segment to
+        determine the directory name used for metadata sidecars.
+
+        Returns:
+            The directory name (e.g. ``"griptape-nodes-metadata"``), or ``None``
+            if the situation is not defined in the template.
+        """
+        result = GriptapeNodes.handle_request(GetSituationRequest(situation_name=METADATA_SITUATION_NAME))
+        if not isinstance(result, GetSituationResultSuccess):
+            return None
+
+        macro = result.situation.macro
+        # Extract the first {name} token from the macro string.
+        if macro.startswith("{"):
+            end = macro.index("}")
+            return macro[1:end].split("?")[0]  # strip optional-format suffix
+
+        return None
+
+    def _resolve_metadata_dir(self) -> Path | None:
+        """Resolve the metadata sidecar directory to an absolute path.
+
+        Returns:
+            The absolute path to the metadata directory, or None if resolution fails.
+        """
+        try:
+            dir_name = self._get_metadata_dir_name()
+            if dir_name is None:
+                logger.debug("Metadata situation not defined in project template")
                 return None
 
-            # Return the absolute path from the result
-            # The result object contains the resolved path
-            # Type ignore needed due to ResultPayload not exposing attributes in type hints
-            return Path(result.payload) if result.payload else None  # type: ignore[attr-defined]
+            parsed_macro = ParsedMacro(f"{{{dir_name}}}")
+            request = GetPathForMacroRequest(parsed_macro=parsed_macro, variables={})
+            result = GriptapeNodes.handle_request(request)
 
-        except MacroSyntaxError as e:
-            # Not a valid macro syntax
-            logger.debug("Invalid macro syntax for '%s': %s", macro_string, e)
-            return None
+            if not isinstance(result, GetPathForMacroResultSuccess):
+                logger.debug("Failed to resolve metadata directory: %s", result)
+                return None
         except Exception as e:
-            logger.error("Error resolving macro '%s': %s", macro_string, e)
+            logger.error("Error resolving metadata directory: %s", e)
             return None
+        else:
+            return result.absolute_path
 
-    async def _upload_file_and_get_url(self, file_path: Path, bucket_id: str) -> str | None:
+    def _resolve_project_base_dir(self) -> Path | None:
+        """Get the current project's base directory.
+
+        Returns:
+            The absolute path to the project base directory, or None if not available.
+        """
+        try:
+            result = GriptapeNodes.handle_request(GetCurrentProjectRequest())
+            if not isinstance(result, GetCurrentProjectResultSuccess):
+                logger.debug("Failed to get current project: %s", result)
+                return None
+        except Exception as e:
+            logger.error("Error getting current project: %s", e)
+            return None
+        else:
+            return result.project_info.project_base_dir
+
+    def _has_metadata_sidecar(self, file_path: Path, metadata_dir: Path, project_base_dir: Path) -> bool:
+        """Check if a file has a metadata sidecar, confirming it was produced by the macro system.
+
+        Args:
+            file_path: The absolute path to the file to check
+            metadata_dir: The absolute path to the metadata sidecar directory
+            project_base_dir: The absolute path to the project base directory
+
+        Returns:
+            True if the file has a metadata sidecar, False otherwise.
+        """
+        try:
+            relative_path = file_path.relative_to(project_base_dir)
+        except ValueError:
+            # File is not inside the project directory
+            return False
+
+        sidecar_path = metadata_dir / f"{relative_path}.json"
+        return sidecar_path.exists()
+
+    async def _upload_file_and_get_url(self, file_path: Path, bucket_id: str, project_base_dir: Path) -> str | None:
         """Upload a file to Griptape Cloud and get a presigned URL.
 
-        This method follows the same pattern as GriptapeCloudStorageDriver:
-        1. Create an asset in the bucket
-        2. Get a presigned upload URL
-        3. Upload the file content
-        4. Generate a presigned download URL
+        This method:
+        1. Creates an asset in the bucket
+        2. Gets a presigned upload URL
+        3. Uploads the file content
+        4. Generates a presigned download URL
 
         Args:
             file_path: The path to the file to upload
             bucket_id: The Griptape Cloud bucket ID
+            project_base_dir: The absolute path to the project base directory
 
         Returns:
             The presigned download URL, or None if upload fails
@@ -235,22 +374,24 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
             with file_path.open("rb") as f:
                 file_content = f.read()
 
-            # Use the file name as the asset name in the bucket
-            asset_name = file_path.name
+            # Use the relative path as the asset name to avoid collisions
+            try:
+                relative_path = file_path.relative_to(project_base_dir)
+                asset_name = str(relative_path)
+            except ValueError:
+                asset_name = file_path.name
 
             # Create the asset in Griptape Cloud
-            # Uses the _create_asset method from BaseGriptapeCloudNode's GriptapeCloudApiMixin
-            self._create_asset(asset_name=asset_name, bucket_id=bucket_id)
+            await asyncio.to_thread(self._create_asset, asset_name=asset_name, bucket_id=bucket_id)
 
             # Get a presigned upload URL
-            # Uses the _create_asset_url method from GriptapeCloudApiMixin
-            upload_response = self._create_asset_url(
-                asset_name=asset_name, bucket_id=bucket_id, operation=AssertUrlOperation.PUT
+            upload_response = await asyncio.to_thread(
+                self._create_asset_url, asset_name=asset_name, bucket_id=bucket_id, operation=AssertUrlOperation.PUT
             )
 
             # Upload the file content using the presigned URL
             upload_url = upload_response.url
-            upload_headers = upload_response.headers.to_dict() if hasattr(upload_response.headers, "to_dict") else {}
+            upload_headers = upload_response.headers.to_dict()
 
             async with httpx.AsyncClient() as client:
                 response = await client.put(upload_url, content=file_content, headers=upload_headers, timeout=60.0)
@@ -259,9 +400,8 @@ class GriptapeCloudEndFlow(EndNode, BaseGriptapeCloudNode):
             logger.debug("Successfully uploaded file '%s' to Griptape Cloud", file_path.name)
 
             # Generate a presigned download URL
-            # Uses the _create_asset_url method from GriptapeCloudApiMixin
-            download_response = self._create_asset_url(
-                asset_name=asset_name, bucket_id=bucket_id, operation=AssertUrlOperation.GET
+            download_response = await asyncio.to_thread(
+                self._create_asset_url, asset_name=asset_name, bucket_id=bucket_id, operation=AssertUrlOperation.GET
             )
 
         except Exception as e:
