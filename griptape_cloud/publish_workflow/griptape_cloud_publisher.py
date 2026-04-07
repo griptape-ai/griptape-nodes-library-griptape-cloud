@@ -67,6 +67,10 @@ from griptape_nodes.retained_mode.events.parameter_events import (
     SetParameterValueRequest,
     SetParameterValueResultSuccess,
 )
+from griptape_nodes.retained_mode.events.project_events import (
+    GetCurrentProjectRequest,
+    GetCurrentProjectResultSuccess,
+)
 from griptape_nodes.retained_mode.events.secrets_events import (
     GetAllSecretValuesRequest,
     GetAllSecretValuesResultSuccess,
@@ -762,6 +766,30 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
         for key, val in env_file_dict.items():
             set_key(env_file_path, key, str(val))
 
+    def _write_project_template(self, bundle_dir: Path) -> None:
+        """Write the current project template into the bundle for the cloud worker.
+
+        The worker script loads this project file before registering libraries
+        so that directory macros and situations (e.g. metadata sidecars) resolve
+        correctly in the cloud runtime environment.
+
+        Args:
+            bundle_dir: The directory where the bundle is being assembled.
+        """
+        current_project_result = GriptapeNodes.handle_request(GetCurrentProjectRequest())
+        if not isinstance(current_project_result, GetCurrentProjectResultSuccess):
+            logger.warning(
+                "Could not retrieve current project template: %s. No project.yml will be written for the cloud worker.",
+                current_project_result,
+            )
+            return
+
+        template = current_project_result.project_info.template.model_copy(deep=True)
+        project_yaml = template.to_yaml()
+        project_yaml_path = bundle_dir / "project.yml"
+        project_yaml_path.write_text(project_yaml, encoding="utf-8")
+        logger.info("Wrote project template to %s", project_yaml_path)
+
     def _package_workflow(self, workflow_name: str, start_flow_node: GriptapeCloudStartFlow | None) -> str:  # noqa: PLR0915
         config_manager = GriptapeNodes.ConfigManager()
         secrets_manager = GriptapeNodes.SecretsManager()
@@ -927,6 +955,9 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                     init_file.write('"""This is a temporary __init__.py file for the structure."""\n')
 
                 self._copy_file(config_file_path, tmp_dir_path / "griptape_nodes_config.json")
+
+                # Write the project template so the cloud worker can load it
+                self._write_project_template(tmp_dir_path)
 
             except Exception as e:
                 details = f"Failed to copy files to temporary directory. Error: {e}"

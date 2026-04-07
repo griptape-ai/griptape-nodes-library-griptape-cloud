@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
@@ -82,6 +83,11 @@ class GriptapeCloudApiMixin:
     """Mixin class providing shared Griptape Cloud API functionality."""
 
     gtc_client: "AuthenticatedClient"
+
+    @staticmethod
+    def is_executing_in_structure_runtime() -> bool:
+        """Check if the current process is running inside a Griptape Cloud worker."""
+        return bool(os.environ.get("GT_CLOUD_STRUCTURE_RUN_ID"))
 
     def format_error_message_for_response(
         self, message: str, response: ClientErrorResponseContent | ServiceErrorResponseContent | Any

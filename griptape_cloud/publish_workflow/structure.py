@@ -168,8 +168,39 @@ def _parse_argparse_args() -> tuple[dict, bool]:
     return flow_input, pickle_result
 
 
+def _load_project_template(project_path: Path) -> None:
+    """Load and activate a project template before libraries are registered.
+
+    The project template must be active before libraries so that nodes which
+    resolve situations during init (e.g. save_node_output) see the template's
+    definitions, including the metadata sidecar directory.
+    """
+    from griptape_nodes.retained_mode.events.project_events import (
+        LoadProjectTemplateRequest,
+        LoadProjectTemplateResultSuccess,
+        SetCurrentProjectRequest,
+    )
+    from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+
+    load_result = GriptapeNodes.handle_request(LoadProjectTemplateRequest(project_path=project_path))
+    if not isinstance(load_result, LoadProjectTemplateResultSuccess):
+        logger.warning("Failed to load project template from %s: %s", project_path, load_result)
+        return
+    set_result = GriptapeNodes.handle_request(SetCurrentProjectRequest(project_id=load_result.project_id))
+    if set_result.failed():
+        logger.warning("Failed to set project as current: %s", set_result)
+        return
+    logger.info("Loaded and activated project template from %s", project_path)
+
+
 # Patch singleton + secrets initialization order bug before triggering GriptapeNodes init
 _apply_init_patch()
+
+# Load project template before libraries so that situations are available
+# during node initialization.
+_project_file = workspace_dir / "project.yml"
+if _project_file.exists():
+    _load_project_template(_project_file)
 
 # Set libraries before importing workflow so that library reloading
 # happens before the workflow is loaded
