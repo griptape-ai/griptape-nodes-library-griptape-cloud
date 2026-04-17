@@ -52,6 +52,8 @@ from griptape_nodes.retained_mode.events.flow_events import GetTopLevelFlowReque
 from griptape_nodes.retained_mode.events.node_events import (
     GetNodeMetadataRequest,
     GetNodeMetadataResultSuccess,
+    SerializeNodeToCommandsRequest,
+    SerializeNodeToCommandsResultSuccess,
     SetNodeMetadataRequest,
     SetNodeMetadataResultSuccess,
 )
@@ -129,6 +131,8 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
         self.pickle_control_flow_result = pickle_control_flow_result
         self._progress: float = 0.0
         self._webhook_mode: bool = False
+        self._griptape_cloud_start_flow_node_commands: SerializeNodeToCommandsResultSuccess | None = None
+        self._unique_parameter_uuid_to_values: dict = {}
 
     def publish_workflow(self) -> ResultPayload:
         try:
@@ -147,6 +151,9 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
 
             self._create_run_input = self._gather_griptape_cloud_start_flow_input(workflow_shape)
             griptape_cloud_start_flow_node = self._get_griptape_cloud_start_flow_node()
+            self._griptape_cloud_start_flow_node_commands = self._get_griptape_cloud_start_flow_node_commands(
+                griptape_cloud_start_flow_node, self._unique_parameter_uuid_to_values
+            )
 
             # Package the workflow
             self._emit_progress_event(additional_progress=20.0, message="Packaging workflow...")
@@ -338,6 +345,27 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
             if node.__class__.__name__ == GriptapeCloudStartFlow.__name__:
                 return cast("GriptapeCloudStartFlow", node)
         return None
+
+    def _get_griptape_cloud_start_flow_node_commands(
+        self,
+        griptape_cloud_start_flow_node: GriptapeCloudStartFlow | None,
+        unique_parameter_uuid_to_values: dict,
+    ) -> SerializeNodeToCommandsResultSuccess | None:
+        if griptape_cloud_start_flow_node is None:
+            logger.warning("No GriptapeCloudStartFlow node found.")
+            return None
+
+        serialize_node_to_commands_request = SerializeNodeToCommandsRequest(
+            node_name=griptape_cloud_start_flow_node.name,
+            unique_parameter_uuid_to_values=unique_parameter_uuid_to_values,
+        )
+        serialize_node_to_commands_result = GriptapeNodes.handle_request(serialize_node_to_commands_request)
+        if not isinstance(serialize_node_to_commands_result, SerializeNodeToCommandsResultSuccess):
+            details = f"Failed to serialize node '{griptape_cloud_start_flow_node.name}' to commands."
+            logger.error(details)
+            raise TypeError(details)
+
+        return serialize_node_to_commands_result
 
     @classmethod
     def _collect_workflow_download_commands(cls) -> list[str]:
@@ -1026,6 +1054,9 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                 executor_workflow_name=self._published_workflow_file_name,
                 libraries=library_paths,
                 pickle_control_flow_result=self.pickle_control_flow_result,
+                griptape_cloud_start_flow_input=self._create_run_input["Griptape Cloud Start Flow"],
+                griptape_cloud_start_flow_node_commands=self._griptape_cloud_start_flow_node_commands,
+                unique_parameter_uuid_to_values=self._unique_parameter_uuid_to_values,
             )
         )
         return builder.generate_executor_workflow()
