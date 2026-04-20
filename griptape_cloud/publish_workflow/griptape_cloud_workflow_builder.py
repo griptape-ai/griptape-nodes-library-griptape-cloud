@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from griptape_cloud_client.models.update_structure_response_content import UpdateStructureResponseContent
+from griptape_nodes.retained_mode.events.node_events import SerializeNodeToCommandsResultSuccess
 from griptape_nodes.retained_mode.events.parameter_events import AddParameterToNodeRequest
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
@@ -40,6 +41,9 @@ class GriptapeCloudWorkflowBuilderInput:
     webhook_integration: GriptapeCloudWebhookIntegration | None = None
     libraries: list[str] = field(default_factory=list)
     pickle_control_flow_result: bool = False
+    griptape_cloud_start_flow_input: dict[str, Any] = field(default_factory=dict)
+    griptape_cloud_start_flow_node_commands: SerializeNodeToCommandsResultSuccess | None = None
+    unique_parameter_uuid_to_values: dict = field(default_factory=dict)
 
 
 class GriptapeCloudWorkflowBuilder:
@@ -147,7 +151,10 @@ from griptape_nodes.retained_mode.events.library_events import (
     RegisterLibraryFromFileRequest,
     RegisterLibraryFromRequirementSpecifierRequest,
 )
-from griptape_nodes.retained_mode.events.parameter_events import AddParameterToNodeRequest
+from griptape_nodes.retained_mode.events.parameter_events import (
+    AddParameterToNodeRequest,
+    SetParameterValueRequest,
+)
 from griptape_nodes.retained_mode.events.connection_events import CreateConnectionRequest
 from griptape_nodes.retained_mode.events.workflow_events import SaveWorkflowRequest
 
@@ -389,6 +396,37 @@ def main():
 
         return script
 
+    def _build_start_flow_value_script(self) -> str:
+        """Build a script section that persists GriptapeCloudStartFlow parameter values on the generated start flow node."""
+        commands = self.workflow_builder_input.griptape_cloud_start_flow_node_commands
+        if commands is None:
+            return ""
+
+        script = """
+
+    # Set parameter values for Griptape Cloud Start Flow
+    unique_values_dict = """ + repr(self.workflow_builder_input.unique_parameter_uuid_to_values)
+
+        items = dict(self.workflow_builder_input.griptape_cloud_start_flow_input)
+        for param in GriptapeCloudStartFlow.get_default_node_parameter_names():
+            if param in {"exec_in", "exec_out", "failed", "was_successful", "result_details"}:
+                continue
+            if param not in items:
+                items[param] = None
+
+        for param_name, param_value in items.items():
+            for command in commands.set_parameter_value_commands:
+                if command.set_parameter_value_command.parameter_name == param_name:
+                    script += f"""
+    GriptapeNodes.handle_request(SetParameterValueRequest(
+        node_name=start_node_name,
+        parameter_name="{param_name}",
+        value=unique_values_dict.get({command.unique_value_uuid!r}, {param_value!r}),
+        initial_setup=True
+    ))"""
+
+        return script
+
     def _build_script_footer(self) -> str:
         """Build the footer section of the workflow script.
 
@@ -433,9 +471,10 @@ if __name__ == "__main__":
         nodes = self._build_node_creation_script()
         params = self._build_parameter_configuration_script(input_params, output_params)
         connections = self._build_connection_creation_script(input_params, output_params)
+        start_flow_values = self._build_start_flow_value_script()
         footer = self._build_script_footer()
 
-        return header + nodes + params + connections + footer
+        return header + nodes + params + connections + start_flow_values + footer
 
     def _execute_workflow_script(self, script: str) -> None:
         """Execute the workflow creation script in a subprocess."""
