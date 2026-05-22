@@ -2,7 +2,7 @@ import logging
 import os
 import time
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from griptape_cloud_client.api.assets.create_asset import sync as create_asset
 from griptape_cloud_client.api.assets.create_asset_url import sync as create_asset_url
@@ -78,6 +78,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("griptape_nodes")
 
+T = TypeVar("T")
+
 
 class GriptapeCloudApiMixin:
     """Mixin class providing shared Griptape Cloud API functionality."""
@@ -96,210 +98,107 @@ class GriptapeCloudApiMixin:
             return f"{message} Errors: {response.errors}"
         return message
 
+    def _unwrap_response(self, response: Any, expected_type: type[T], action: str) -> T:
+        """Narrow an SDK response to the expected success type, or raise with a formatted error.
+
+        SDK `sync` calls return either the success model, a `ClientErrorResponseContent` /
+        `ServiceErrorResponseContent` for 4xx/5xx, or `None` for unexpected statuses.
+        """
+        if isinstance(response, expected_type):
+            return response
+        msg = self.format_error_message_for_response(
+            f"Error {action}: unexpected response type {type(response)}.", response
+        )
+        logger.error(msg)
+        raise TypeError(msg)
+
     def _get_deployment(self, deployment_id: str) -> GetDeploymentResponseContent:
-        try:
-            response = get_deployment(
-                deployment_id=deployment_id,
-                client=self.gtc_client,
-            )
-            if isinstance(response, GetDeploymentResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error getting deployment: %s", e)
-            raise
+        response = get_deployment(deployment_id=deployment_id, client=self.gtc_client)
+        return self._unwrap_response(response, GetDeploymentResponseContent, "getting deployment")
 
     def _list_structure_deployments(
         self, structure_id: str, status: list[DeploymentStatus] | None = None
     ) -> ListStructureDeploymentsResponseContent:
-        try:
-            status_query = status or UNSET
-            response = list_structure_deployments(
-                structure_id=structure_id, client=self.gtc_client, status=status_query
-            )
-            if isinstance(response, ListStructureDeploymentsResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error getting deployment: %s", e)
-            raise
+        status_query = status or UNSET
+        response = list_structure_deployments(structure_id=structure_id, client=self.gtc_client, status=status_query)
+        return self._unwrap_response(response, ListStructureDeploymentsResponseContent, "listing structure deployments")
 
     def _wait_for_structure_deployment(self, deployment_id: str, timeout: float = 60.0) -> GetDeploymentResponseContent:
-        try:
-            start_time = time.time()
-            while True:
-                response = self._get_deployment(deployment_id=deployment_id)
-                if isinstance(response, GetDeploymentResponseContent):
-                    # Check if deployment is in a terminal state
-                    if response.status in [DeploymentStatus.ERROR, DeploymentStatus.FAILED, DeploymentStatus.SUCCEEDED]:
-                        return response
+        start_time = time.time()
+        while True:
+            response = self._get_deployment(deployment_id=deployment_id)
+            # Check if deployment is in a terminal state
+            if response.status in [DeploymentStatus.ERROR, DeploymentStatus.FAILED, DeploymentStatus.SUCCEEDED]:
+                return response
 
-                    # Check timeout
-                    if time.time() - start_time > timeout:
-                        msg = f"Timeout waiting for deployment {deployment_id} to reach terminal state"
-                        logger.error(msg)
-                        raise TimeoutError(msg)  # noqa: TRY301
+            # Check timeout
+            if time.time() - start_time > timeout:
+                msg = f"Timeout waiting for deployment {deployment_id} to reach terminal state"
+                logger.error(msg)
+                raise TimeoutError(msg)
 
-                    # Wait before next check
-                    time.sleep(1.0)
-                else:
-                    msg = f"Unexpected response type: {type(response)}"
-                    logger.error(msg)
-                    raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error waiting for structure deployment: %s", e)
-            raise
+            # Wait before next check
+            time.sleep(1.0)
 
     def _wait_for_latest_structure_deployment(
         self, structure_id: str, timeout: float = 300.0
     ) -> GetDeploymentResponseContent:
-        try:
-            response = self._list_structure_deployments(structure_id=structure_id)
-            if isinstance(response, ListStructureDeploymentsResponseContent):
-                # Wait for the latest deployment to complete
-                latest_deployment = max(response.deployments, key=lambda d: d.created_at, default=None)
-                if latest_deployment:
-                    return self._wait_for_structure_deployment(latest_deployment.deployment_id, timeout=timeout)
-            msg = f"Unexpected response type: {type(response)}"
+        response = self._list_structure_deployments(structure_id=structure_id)
+        latest_deployment = max(response.deployments, key=lambda d: d.created_at, default=None)
+        if latest_deployment is None:
+            msg = f"No deployments found for structure {structure_id}."
             logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error waiting for latest structure deployment: %s", e)
-            raise
+            raise ValueError(msg)
+        return self._wait_for_structure_deployment(latest_deployment.deployment_id, timeout=timeout)
 
     def _list_buckets(self) -> ListBucketsResponseContent:
-        try:
-            response = list_buckets(
-                client=self.gtc_client,
-                page=1,
-                page_size=100,
-            )
-            if isinstance(response, ListBucketsResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error listing buckets: %s", e)
-            raise
+        response = list_buckets(client=self.gtc_client, page=1, page_size=100)
+        return self._unwrap_response(response, ListBucketsResponseContent, "listing buckets")
 
     def _get_bucket(self, bucket_id: str) -> GetBucketResponseContent:
-        try:
-            response = get_bucket(bucket_id=bucket_id, client=self.gtc_client)
-            if isinstance(response, GetBucketResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error getting bucket: %s", e)
-            raise
+        response = get_bucket(bucket_id=bucket_id, client=self.gtc_client)
+        return self._unwrap_response(response, GetBucketResponseContent, "getting bucket")
 
     def _create_bucket(self, name: str) -> CreateBucketResponseContent:
-        try:
-            response = create_bucket(
-                body=CreateBucketRequestContent(name=name),
-                client=self.gtc_client,
-            )
-            if isinstance(response, CreateBucketResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error creating bucket: %s", e)
-            raise
+        response = create_bucket(body=CreateBucketRequestContent(name=name), client=self.gtc_client)
+        return self._unwrap_response(response, CreateBucketResponseContent, "creating bucket")
 
     def _update_bucket(self, bucket_id: str, name: str) -> UpdateBucketResponseContent:
-        try:
-            response = update_bucket(
-                bucket_id=bucket_id,
-                body=UpdateBucketRequestContent(name=name),
-                client=self.gtc_client,
-            )
-            if isinstance(response, UpdateBucketResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error updating bucket: %s", e)
-            raise
+        response = update_bucket(
+            bucket_id=bucket_id,
+            body=UpdateBucketRequestContent(name=name),
+            client=self.gtc_client,
+        )
+        return self._unwrap_response(response, UpdateBucketResponseContent, "updating bucket")
 
     def _delete_bucket(self, bucket_id: str) -> None:
-        try:
-            delete_bucket(bucket_id=bucket_id, client=self.gtc_client)
-        except Exception as e:
-            logger.error("Error deleting bucket: %s", e)
-            raise
+        delete_bucket(bucket_id=bucket_id, client=self.gtc_client)
 
     def _list_assistants(self) -> ListAssistantsResponseContent:
-        try:
-            response = list_assistants(
-                client=self.gtc_client,
-                page=1,
-                page_size=100,
-            )
-            if isinstance(response, ListAssistantsResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error listing assistants: %s", e)
-            raise
+        response = list_assistants(client=self.gtc_client, page=1, page_size=100)
+        return self._unwrap_response(response, ListAssistantsResponseContent, "listing assistants")
 
     def _get_assistant_run(self, assistant_run_id: str) -> GetAssistantRunResponseContent:
-        try:
-            response = get_assistant_run(assistant_run_id=assistant_run_id, client=self.gtc_client)
-            if isinstance(response, GetAssistantRunResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error getting assistant run: %s", e)
-            raise
+        response = get_assistant_run(assistant_run_id=assistant_run_id, client=self.gtc_client)
+        return self._unwrap_response(response, GetAssistantRunResponseContent, "getting assistant run")
 
     def _create_assistant_run(self, assistant_id: str, args: list[str]) -> CreateAssistantRunResponseContent:
-        try:
-            response = create_assistant_run(
-                assistant_id=assistant_id,
-                body=CreateAssistantRunRequestContent(
-                    args=args,
-                ),
-                client=self.gtc_client,
-            )
-            if isinstance(response, CreateAssistantRunResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error creating assistant run: %s", e)
-            raise
+        response = create_assistant_run(
+            assistant_id=assistant_id,
+            body=CreateAssistantRunRequestContent(args=args),
+            client=self.gtc_client,
+        )
+        return self._unwrap_response(response, CreateAssistantRunResponseContent, "creating assistant run")
 
     def _list_assistant_run_events(
         self, assistant_run_id: str, offset: float | None = None
     ) -> ListAssistantEventsResponseContent:
-        try:
-            response = list_assistant_events(
-                assistant_run_id=assistant_run_id,
-                offset=str(offset) if offset is not None else UNSET,
-                client=self.gtc_client,
-            )
-            if isinstance(response, ListAssistantEventsResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error listing events: %s", e)
-            raise
+        response = list_assistant_events(
+            assistant_run_id=assistant_run_id,
+            offset=str(offset) if offset is not None else UNSET,
+            client=self.gtc_client,
+        )
+        return self._unwrap_response(response, ListAssistantEventsResponseContent, "listing assistant run events")
 
     def _poll_assistant_run_events(self, assistant_run_id: str) -> Generator[list[AssistantEventDetail], None, None]:
         run_completed = False
@@ -319,89 +218,39 @@ class GriptapeCloudApiMixin:
         asset_name: str,
         bucket_id: str,
     ) -> CreateAssetResponseContent:
-        try:
-            response = create_asset(
-                bucket_id=bucket_id,
-                client=self.gtc_client,
-                body=CreateAssetRequestContent(
-                    name=asset_name,
-                ),
-            )
-            if isinstance(response, CreateAssetResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error creating asset: %s", e)
-            raise
+        response = create_asset(
+            bucket_id=bucket_id,
+            client=self.gtc_client,
+            body=CreateAssetRequestContent(name=asset_name),
+        )
+        return self._unwrap_response(response, CreateAssetResponseContent, "creating asset")
 
     def _create_asset_url(
         self, asset_name: str, bucket_id: str, operation: AssertUrlOperation = AssertUrlOperation.GET
     ) -> CreateAssetUrlResponseContent:
-        try:
-            response = create_asset_url(
-                bucket_id=bucket_id,
-                name=asset_name,
-                client=self.gtc_client,
-                body=CreateAssetUrlRequestContent(
-                    operation=operation,
-                ),
-            )
-            if isinstance(response, CreateAssetUrlResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error creating asset URL: %s", e)
-            raise
+        response = create_asset_url(
+            bucket_id=bucket_id,
+            name=asset_name,
+            client=self.gtc_client,
+            body=CreateAssetUrlRequestContent(operation=operation),
+        )
+        return self._unwrap_response(response, CreateAssetUrlResponseContent, "creating asset URL")
 
     def _list_structures(self) -> ListStructuresResponseContent:
-        try:
-            response = list_structures(
-                client=self.gtc_client,
-                page=1,
-                page_size=100,
-            )
-            if isinstance(response, ListStructuresResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error listing structures: %s", e)
-            raise
+        response = list_structures(client=self.gtc_client, page=1, page_size=100)
+        return self._unwrap_response(response, ListStructuresResponseContent, "listing structures")
 
     def _create_structure_run(self, structure_id: str, args: list[str]) -> CreateStructureRunResponseContent:
-        try:
-            response = create_structure_run(
-                structure_id=structure_id,
-                body=CreateStructureRunRequestContent(
-                    args=args,
-                ),
-                client=self.gtc_client,
-            )
-            if isinstance(response, CreateStructureRunResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error creating structure run: %s", e)
-            raise
+        response = create_structure_run(
+            structure_id=structure_id,
+            body=CreateStructureRunRequestContent(args=args),
+            client=self.gtc_client,
+        )
+        return self._unwrap_response(response, CreateStructureRunResponseContent, "creating structure run")
 
     def _get_structure_run(self, structure_run_id: str) -> GetStructureRunResponseContent:
-        try:
-            response = get_structure_run(structure_run_id=structure_run_id, client=self.gtc_client)
-            if isinstance(response, GetStructureRunResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error getting structure run: %s", e)
-            raise
+        response = get_structure_run(structure_run_id=structure_run_id, client=self.gtc_client)
+        return self._unwrap_response(response, GetStructureRunResponseContent, "getting structure run")
 
     def _get_structure_run_bad_statuses(self) -> list[str]:
         return [StructureRunStatus.FAILED, StructureRunStatus.CANCELLED, StructureRunStatus.ERROR]
@@ -409,20 +258,12 @@ class GriptapeCloudApiMixin:
     def _list_structure_run_events(
         self, structure_run_id: str, offset: float | None = None
     ) -> ListEventsResponseContent:
-        try:
-            response = list_events(
-                structure_run_id=structure_run_id,
-                offset=str(offset) if offset is not None else UNSET,
-                client=self.gtc_client,
-            )
-            if isinstance(response, ListEventsResponseContent):
-                return response
-            msg = f"Unexpected response type: {type(response)}"
-            logger.error(msg)
-            raise TypeError(msg)  # noqa: TRY301
-        except Exception as e:
-            logger.error("Error listing events: %s", e)
-            raise
+        response = list_events(
+            structure_run_id=structure_run_id,
+            offset=str(offset) if offset is not None else UNSET,
+            client=self.gtc_client,
+        )
+        return self._unwrap_response(response, ListEventsResponseContent, "listing structure run events")
 
     def _poll_structure_run_events(self, structure_run_id: str) -> Generator[list[EventDetail], None, None]:
         run_completed = False

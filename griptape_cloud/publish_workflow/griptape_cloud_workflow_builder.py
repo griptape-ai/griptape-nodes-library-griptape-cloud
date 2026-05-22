@@ -323,7 +323,12 @@ def main():
         """
 
         # Get supported fields from AddParameterToNodeRequest dataclass
-        supported_fields = {f.name for f in fields(AddParameterToNodeRequest)}
+        # Exclude mode_allowed_* fields since they are passed explicitly below
+        supported_fields = {f.name for f in fields(AddParameterToNodeRequest)} - {
+            "mode_allowed_input",
+            "mode_allowed_property",
+            "mode_allowed_output",
+        }
 
         script = ""
         for param in params:

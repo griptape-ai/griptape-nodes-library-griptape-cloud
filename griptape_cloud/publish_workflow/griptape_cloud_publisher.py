@@ -455,6 +455,10 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                     griptape_cloud_start_flow_node.show_parameter_by_name("webhook_url")
 
             workflow = WorkflowRegistry.get_workflow_by_name(self._workflow_name)
+            if workflow.file_path is None:
+                details = f"Workflow '{self._workflow_name}' is not backed by a file on disk."
+                logger.error(details)
+                raise ValueError(details)
             save_workflow_request = SaveWorkflowRequest(file_name=Path(workflow.file_path).stem)
             save_workflow_response = GriptapeNodes.handle_request(save_workflow_request)
             if not isinstance(save_workflow_response, SaveWorkflowResultSuccess):
@@ -822,6 +826,10 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
         config_manager = GriptapeNodes.ConfigManager()
         secrets_manager = GriptapeNodes.SecretsManager()
         workflow = WorkflowRegistry.get_workflow_by_name(workflow_name)
+        if workflow.file_path is None:
+            details = f"Workflow '{workflow_name}' is not backed by a file on disk."
+            logger.error(details)
+            raise ValueError(details)
 
         engine_version: str = ""
         engine_version_request = GetEngineVersionRequest()
@@ -999,7 +1007,7 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
             requirements_file_path = tmp_dir_path / "requirements.txt"
             with requirements_file_path.open("w", encoding="utf-8") as requirements_file:
                 requirements_file.write(
-                    f"griptape-nodes @ git+https://github.com/griptape-ai/griptape-nodes.git@{engine_version}\n"
+                    f"griptape-nodes-engine @ git+https://github.com/griptape-ai/griptape-nodes.git@{engine_version}\n"
                 )
                 requirements_file.write(
                     "griptape_cloud_client @ git+https://github.com/griptape-ai/griptape-cloud-python-client.git@main"
