@@ -8,7 +8,7 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.12.0, <3.13"
 dependencies = [
-    "griptape-nodes",
+    "griptape-nodes-engine",
     "python-dotenv==1.1.1",
     "griptape-cloud-client",
     "pyyaml>=6.0",
@@ -19,7 +19,7 @@ dev = ["mdformat>=0.7.22", "pyright>=1.1.396", "ruff>=0.11.0", "typos>=1.30.2", 
 test = ["pytest>=8.3.5", "pytest_asyncio>=1.1.0"]
 
 [tool.uv.sources]
-griptape-nodes = { git = "https://github.com/griptape-ai/griptape-nodes", rev = "main"}
+griptape-nodes-engine = { git = "https://github.com/griptape-ai/griptape-nodes", rev = "main"}
 griptape-cloud-client = { git = "https://github.com/griptape-ai/griptape-cloud-python-client", rev = "main" }
 
 [tool.ruff]
