@@ -206,12 +206,9 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
         return ResultDetails(*result_details)
 
     @classmethod
-    def _get_base_url(cls, *, api_url: bool = True) -> str:
+    def _get_base_url(cls) -> str:
         """Retrieves the base URL for the Griptape Cloud service."""
-        base_url = os.environ.get("GT_CLOUD_BASE_URL") or "https://cloud.griptape.ai"
-        if api_url and not base_url.endswith("/api"):
-            base_url = urljoin(base_url, "/api")
-        return base_url
+        return os.environ.get("GT_CLOUD_BASE_URL") or "https://cloud.griptape.ai"
 
     @classmethod
     def _get_config_value(cls, service: str, value: str) -> str:
@@ -271,7 +268,7 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
 
     def _get_publish_workflow_response_metadata(self, structure_id: str) -> dict[str, Any]:
         structure_url = urljoin(
-            self._get_base_url(api_url=False),
+            self._get_base_url(),
             f"/structures/{structure_id}",
         )
         return {

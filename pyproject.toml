@@ -10,7 +10,7 @@ requires-python = ">=3.12.0, <3.13"
 dependencies = [
     "griptape-nodes-engine",
     "python-dotenv==1.1.1",
-    "griptape-cloud-client",
+    "griptape-cloud-client>=0.2.0",
     "pyyaml>=6.0",
 ]
 
@@ -20,7 +20,6 @@ test = ["pytest>=8.3.5", "pytest_asyncio>=1.1.0"]
 
 [tool.uv.sources]
 griptape-nodes-engine = { git = "https://github.com/griptape-ai/griptape-nodes", rev = "main"}
-griptape-cloud-client = { git = "https://github.com/griptape-ai/griptape-cloud-python-client", rev = "main" }
 
 [tool.ruff]
 line-length = 120

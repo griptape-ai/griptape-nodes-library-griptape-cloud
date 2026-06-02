@@ -306,7 +306,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "griptape-cloud-client", git = "https://github.com/griptape-ai/griptape-cloud-python-client?rev=main" },
+    { name = "griptape-cloud-client", specifier = ">=0.2.0" },
     { name = "griptape-nodes-engine", git = "https://github.com/griptape-ai/griptape-nodes?rev=main" },
     { name = "python-dotenv", specifier = "==1.1.1" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -327,13 +327,17 @@ test = [
 
 [[package]]
 name = "griptape-cloud-client"
-version = "0.1.0"
-source = { git = "https://github.com/griptape-ai/griptape-cloud-python-client?rev=main#47173f8815aa06f0e2b3b833d68af5b81d1bae63" }
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
     { name = "httpx" },
     { name = "python-dateutil" },
     { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bf/40/7740d4fb6a1d192a71d88ba0c84a6ec4c8d5ef413bba9da392bf6c6d20c8/griptape_cloud_client-0.2.0.tar.gz", hash = "sha256:8f9d07c92f1622bd24921bfb8c9686e15e6911502a735bcdfe916669bf3892a5", size = 181600, upload-time = "2026-06-02T19:35:01.78Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/87/00/468e317a98035625bd1bb8e87c3bfeddfe3ccd2f8ee3f6819a1dc77b719d/griptape_cloud_client-0.2.0-py3-none-any.whl", hash = "sha256:d6b178bbce7292b2959a1ca6bdd43448b02868d44a0807a1d838205aef013bc4", size = 755020, upload-time = "2026-06-02T19:35:02.882Z" },
 ]
 
 [[package]]
