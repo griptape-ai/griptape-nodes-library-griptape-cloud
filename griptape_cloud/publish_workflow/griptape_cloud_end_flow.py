@@ -24,7 +24,7 @@ from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 from griptape_cloud.base.base_griptape_cloud_node import (
     API_KEY_ENV_VAR,
-    DEFAULT_GRIPTAPE_CLOUD_ENDPOINT,
+    DEFAULT_GRIPTAPE_CLOUD_URL,
 )
 from griptape_cloud.mixins.griptape_cloud_api_mixin import GriptapeCloudApiMixin
 
@@ -58,7 +58,7 @@ class GriptapeCloudEndFlow(EndNode, GriptapeCloudApiMixin):
         # Set up the Griptape Cloud API client (from GriptapeCloudApiMixin)
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR) or ""
         self.gtc_client = AuthenticatedClient(
-            base_url=DEFAULT_GRIPTAPE_CLOUD_ENDPOINT,
+            base_url=DEFAULT_GRIPTAPE_CLOUD_URL,
             token=api_key,
             verify_ssl=False,
         )

@@ -1,6 +1,5 @@
 import logging
 import os
-from urllib.parse import urljoin
 
 from griptape_cloud_client.client import AuthenticatedClient
 from griptape_nodes.exe_types.node_types import BaseNode
@@ -9,7 +8,6 @@ from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_cloud.mixins.griptape_cloud_api_mixin import GriptapeCloudApiMixin
 
 DEFAULT_GRIPTAPE_CLOUD_URL = os.getenv("GT_CLOUD_BASE_URL", "https://cloud.griptape.ai")
-DEFAULT_GRIPTAPE_CLOUD_ENDPOINT = urljoin(base=DEFAULT_GRIPTAPE_CLOUD_URL, url="/api/")
 API_KEY_ENV_VAR = "GT_CLOUD_API_KEY"
 SERVICE = "Griptape"
 
@@ -22,7 +20,7 @@ class BaseGriptapeCloudNode(BaseNode, GriptapeCloudApiMixin):
         if name is not None:
             kwargs["name"] = name
         super().__init__(**kwargs)
-        self.base_url = DEFAULT_GRIPTAPE_CLOUD_ENDPOINT
+        self.base_url = DEFAULT_GRIPTAPE_CLOUD_URL
         self.gtc_client = AuthenticatedClient(
             base_url=self.base_url,
             token=self._get_gt_cloud_api_key(),
