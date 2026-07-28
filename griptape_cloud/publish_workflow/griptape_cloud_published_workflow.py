@@ -19,7 +19,6 @@ from griptape_cloud.publish_workflow.parameters.griptape_cloud_webhook_config_pa
 )
 
 logger = logging.getLogger("griptape_nodes")
-logger.setLevel(logging.INFO)
 
 
 class PublishedWorkflowExecutionStatus(StrEnum):

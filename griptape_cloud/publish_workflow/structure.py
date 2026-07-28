@@ -19,7 +19,6 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger("griptape_nodes")
-logger.setLevel(logging.INFO)
 
 load_dotenv()
 
