@@ -36,6 +36,7 @@ from griptape_cloud_client.models.structure_code_type_1 import StructureCodeType
 from griptape_cloud_client.models.update_structure_request_content import UpdateStructureRequestContent
 from griptape_cloud_client.models.update_structure_response_content import UpdateStructureResponseContent
 from griptape_cloud_client.models.webhook_input import WebhookInput
+from griptape_nodes.drivers.storage.griptape_cloud_storage_driver import GriptapeCloudStorageDriver
 from griptape_nodes.node_library.library_registry import LibraryNameAndVersion, LibraryRegistry
 from griptape_nodes.node_library.workflow_registry import Workflow, WorkflowRegistry
 from griptape_nodes.retained_mode.events.app_events import (
@@ -324,19 +325,46 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
             exceptions.append(e)
         return exceptions
 
+    def _resolve_bucket_id(self) -> str:
+        """Returns the Bucket to publish to.
+
+        Prefers the GT_CLOUD_PUBLISH_BUCKET_ID setting, then the GT_CLOUD_BUCKET_ID secret the
+        engine stores its assets in, and finally the organization's default Bucket, which is
+        guaranteed to exist and cannot be deleted. Publishing therefore needs no Bucket
+        configuration at all.
+        """
+        bucket_id = GriptapeNodes.ConfigManager().get_config_value(
+            f"{GRIPTAPE_CLOUD_LIBRARY_CONFIG_KEY}.GT_CLOUD_PUBLISH_BUCKET_ID"
+        )
+        if bucket_id:
+            return bucket_id
+
+        bucket_id = GriptapeNodes.SecretsManager().get_secret("GT_CLOUD_BUCKET_ID", should_error_on_not_found=False)
+        if bucket_id:
+            return bucket_id
+
+        # The generated client cannot parse the organizations response, so use the engine's
+        # reader, which pulls default_bucket_id off the raw payload.
+        bucket_id = GriptapeCloudStorageDriver.get_default_bucket_id(
+            base_url=self._get_base_url(), api_key=self._get_secret("GT_CLOUD_API_KEY")
+        )
+        if not bucket_id:
+            details = (
+                "No Griptape Cloud Bucket is available to publish to. Set the GT_CLOUD_PUBLISH_BUCKET_ID setting or "
+                "the GT_CLOUD_BUCKET_ID secret."
+            )
+            logger.error(details)
+            raise ValueError(details)
+
+        logger.info("No Bucket is configured for publishing, using the organization default Bucket '%s'.", bucket_id)
+        return bucket_id
+
     def _validate_before_publish(self) -> list[Exception]:
         """Validate the workflow before publishing."""
         exceptions: list[Exception] = []
 
         try:
-            self._gt_cloud_bucket_id = self._get_config_value(
-                GRIPTAPE_CLOUD_LIBRARY_CONFIG_KEY, "GT_CLOUD_PUBLISH_BUCKET_ID"
-            )
-        except Exception as e:
-            exceptions.append(e)
-
-        try:
-            self._get_secret("GT_CLOUD_BUCKET_ID")
+            self._gt_cloud_bucket_id = self._resolve_bucket_id()
         except Exception as e:
             exceptions.append(e)
 
@@ -547,7 +575,7 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
         self, package_path: str, griptape_cloud_start_flow_node: GriptapeCloudStartFlow | None
     ) -> UpdateStructureResponseContent:
         if self._gt_cloud_bucket_id is None:
-            details = "GT_CLOUD_PUBLISH_BUCKET_ID is not set in the configuration."
+            details = "No Griptape Cloud Bucket was resolved for publishing."
             logger.error(details)
             raise ValueError(details)
 
@@ -815,6 +843,13 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
         for secret_name, secret_value in secret_values.items():
             if secret_name not in env_file_dict:
                 env_file_dict[secret_name] = secret_value
+
+        # The published Structure stores its static files in Griptape Cloud, which needs a Bucket in
+        # its environment. Neither the workspace env file nor the SecretsManager is guaranteed to
+        # carry one, so fall back to the Bucket this publish resolved. Without it the Structure
+        # silently falls back to local storage and the files it writes are lost when the run ends.
+        if not env_file_dict.get("GT_CLOUD_BUCKET_ID") and self._gt_cloud_bucket_id is not None:
+            env_file_dict["GT_CLOUD_BUCKET_ID"] = self._gt_cloud_bucket_id
 
         return env_file_dict
 
