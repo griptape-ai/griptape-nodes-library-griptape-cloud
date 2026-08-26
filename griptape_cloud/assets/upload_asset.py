@@ -1,16 +1,14 @@
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import requests
 from griptape_cloud_client.models.assert_url_operation import AssertUrlOperation
+from griptape_cloud_client.models.bucket_detail import BucketDetail
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import ControlNode
 
 from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
-
-if TYPE_CHECKING:
-    from griptape_cloud_client.models.bucket_detail import BucketDetail
 
 logger = logging.getLogger("griptape_nodes")
 
@@ -26,8 +24,8 @@ class UploadAsset(BaseGriptapeCloudNode, ControlNode):
                 type="BucketDetail",
                 output_type="BucketDetail",
                 default_value=None,
-                tooltip="The bucket to upload to",
-                allowed_modes={ParameterMode.INPUT},
+                tooltip="The bucket to upload to. Defaults to the Griptape Cloud default bucket when not supplied.",
+                allowed_modes={ParameterMode.INPUT, ParameterMode.OUTPUT},
             )
         )
 
@@ -77,10 +75,6 @@ class UploadAsset(BaseGriptapeCloudNode, ControlNode):
         exceptions = super().validate_before_node_run() or []
 
         try:
-            if not self.get_parameter_value("bucket"):
-                msg = "Bucket is not set. Configure the Node with a valid Griptape Cloud Bucket before running."
-                exceptions.append(ValueError(msg))
-
             if not self.get_parameter_value("asset_name"):
                 msg = "Asset name is not set. Configure the Node with a valid asset name before running."
                 exceptions.append(ValueError(msg))
@@ -93,26 +87,35 @@ class UploadAsset(BaseGriptapeCloudNode, ControlNode):
                 msg = f"File does not exist at path: {file_path}"
                 exceptions.append(FileNotFoundError(msg))
 
-            cast("BucketDetail", self.get_parameter_value("bucket"))
-
         except Exception as e:
             exceptions.append(e)
 
         return exceptions or None
 
+    def _resolve_bucket(self) -> BucketDetail:
+        """Returns the configured bucket, falling back to the default bucket."""
+        bucket = cast("BucketDetail | None", self.get_parameter_value("bucket"))
+        if bucket is not None:
+            return bucket
+
+        bucket_id = self._get_default_bucket_id()
+        logger.info("No bucket supplied, uploading to default bucket %s", bucket_id)
+        return BucketDetail.from_dict(self._get_bucket(bucket_id).to_dict())
+
     def _process(self) -> None:
-        bucket = cast("BucketDetail", self.get_parameter_value("bucket"))
         asset_name = self.get_parameter_value("asset_name")
         file_path = self.get_parameter_value("file_path")
         content_type = self.get_parameter_value("content_type")
 
-        if bucket and asset_name and file_path:
+        if asset_name and file_path:
             try:
+                bucket = self._resolve_bucket()
+                bucket_id = bucket.bucket_id
                 self._create_asset(
                     asset_name=asset_name,
-                    bucket_id=bucket.bucket_id,
+                    bucket_id=bucket_id,
                 )
-                upload_url_response = self._create_asset_url(asset_name, bucket.bucket_id, AssertUrlOperation.PUT)
+                upload_url_response = self._create_asset_url(asset_name, bucket_id, AssertUrlOperation.PUT)
 
                 with Path(file_path).open("rb") as file:
                     headers = upload_url_response.headers.to_dict() or {}
@@ -121,8 +124,9 @@ class UploadAsset(BaseGriptapeCloudNode, ControlNode):
                     upload_response.raise_for_status()
 
                 self.parameter_output_values["asset_name"] = asset_name
+                self.parameter_output_values["bucket"] = bucket
 
-                logger.info("Successfully uploaded asset %s to bucket %s", asset_name, bucket.bucket_id)
+                logger.info("Successfully uploaded asset %s to bucket %s", asset_name, bucket_id)
 
             except Exception as e:
                 logger.error("Error uploading asset: %s", e)

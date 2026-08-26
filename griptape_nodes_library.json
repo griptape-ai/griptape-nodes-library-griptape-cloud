@@ -8,7 +8,8 @@
       "category": "griptape_cloud_library",
       "contents": {
         "GT_CLOUD_PUBLISH_BUCKET_ID": "",
-        "GT_CLOUD_PUBLISH_DOWNLOAD_MODELS": true
+        "GT_CLOUD_PUBLISH_DOWNLOAD_MODELS": true,
+        "GT_CLOUD_PUBLISH_UPLOAD_TIMEOUT_SECONDS": 900
       }
     }
   ],
