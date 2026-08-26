@@ -110,6 +110,23 @@ logger = logging.getLogger("griptape_cloud_publisher")
 
 GRIPTAPE_SERVICE = "Griptape"
 
+# Uploading the packaged workflow to the data lake is a single large PUT over a link that is often
+# slow, so it needs a far more generous budget than a typical API call. Overridable via the
+# GT_CLOUD_PUBLISH_UPLOAD_TIMEOUT_SECONDS setting.
+DEFAULT_UPLOAD_TIMEOUT_SECONDS = 900.0
+
+# Directories that are never needed by a library at runtime. Excluding them keeps the published
+# package small — repository history alone can be several times the size of the library itself.
+LIBRARY_COPY_IGNORE_PATTERNS = [
+    ".venv",
+    "__pycache__",
+    ".git",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+    ".DS_Store",
+]
+
 
 class GriptapeCloudPublisher(GriptapeCloudApiMixin):
     def __init__(
@@ -480,6 +497,15 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
 
         return workflow_input
 
+    @classmethod
+    def _get_upload_timeout_seconds(cls) -> float:
+        """Retrieves the timeout to use when uploading the packaged workflow to the data lake."""
+        return GriptapeNodes.ConfigManager().get_config_value(
+            f"{GRIPTAPE_CLOUD_LIBRARY_CONFIG_KEY}.GT_CLOUD_PUBLISH_UPLOAD_TIMEOUT_SECONDS",
+            default=DEFAULT_UPLOAD_TIMEOUT_SECONDS,
+            cast_type=float,
+        )
+
     def _upload_file_to_data_lake(self, name: str, value: bytes, bucket_id: str) -> None:
         create_asset_response = create_asset(
             client=self._gtc_client,
@@ -507,8 +533,10 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
             raise TypeError(msg)
         url = create_asset_url_response.url
         headers = create_asset_url_response.headers
+        timeout = self._get_upload_timeout_seconds()
         try:
-            response = self._client.put(url=url, headers=headers.to_dict(), content=value, timeout=60.0)
+            logger.info("Uploading %.2f MB to data lake asset '%s' (timeout %.0fs)", len(value) / 1e6, name, timeout)
+            response = self._client.put(url=url, headers=headers.to_dict(), content=value, timeout=timeout)
             response.raise_for_status()
         except Exception:
             msg = "Failed to upload file to data lake"
@@ -662,7 +690,7 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                 copy_tree_request = CopyTreeRequest(
                     source_path=str(common_root),
                     destination_path=str(dest),
-                    ignore_patterns=[".venv", "__pycache__"],
+                    ignore_patterns=LIBRARY_COPY_IGNORE_PATTERNS,
                     dirs_exist_ok=True,
                 )
                 copy_tree_result = GriptapeNodes.handle_request(copy_tree_request)

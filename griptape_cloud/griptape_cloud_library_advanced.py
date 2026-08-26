@@ -47,5 +47,8 @@ class GriptapeCloudLibraryAdvanced(AdvancedNodeLibrary):
                 start_flow_node_library_name=library_data.name,
                 end_flow_node_type="GriptapeCloudEndFlow",
                 end_flow_node_library_name=library_data.name,
+                display_name="Publish to Griptape Cloud",
+                description="Package the workflow and deploy it to Griptape Cloud as a Structure, invocable via an API.",
+                icon="cloud",
             ),
         )

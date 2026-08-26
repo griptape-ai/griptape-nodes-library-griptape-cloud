@@ -70,26 +70,6 @@ class CreateAssetUrl(BaseGriptapeCloudNode, ControlNode):
             )
         )
 
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        exceptions = super().validate_before_workflow_run() or []
-
-        try:
-            if not self.get_parameter_value("bucket"):
-                msg = "Bucket is not set. Configure the Node with a valid Griptape Cloud Bucket before running."
-                exceptions.append(ValueError(msg))
-
-            if not self.get_parameter_value("asset_name"):
-                msg = "Asset name is not set. Configure the Node with a valid asset name before running."
-                exceptions.append(ValueError(msg))
-
-            cast("BucketDetail", self.get_parameter_value("bucket"))
-
-        except Exception as e:
-            exceptions.append(e)
-
-        # if there are exceptions, they will display when the user tries to run the flow with the node.
-        return exceptions or None
-
     def _process(self) -> None:
         bucket = cast("BucketDetail", self.get_parameter_value("bucket"))
         asset_name = self.get_parameter_value("asset_name")
