@@ -8,6 +8,7 @@ PublishedWorkflow node which handles parameter mapping automatically.
 """
 
 import logging
+import os
 import subprocess
 import sys
 import uuid
@@ -18,12 +19,20 @@ from typing import Any
 from griptape_cloud_client.models.update_structure_response_content import UpdateStructureResponseContent
 from griptape_nodes.retained_mode.events.node_events import SerializeNodeToCommandsResultSuccess
 from griptape_nodes.retained_mode.events.parameter_events import AddParameterToNodeRequest
+from griptape_nodes.retained_mode.events.project_events import (
+    GetCurrentProjectRequest,
+    GetCurrentProjectResultSuccess,
+)
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 from griptape_cloud.publish_workflow.griptape_cloud_published_workflow import GriptapeCloudPublishedWorkflow
 from griptape_cloud.publish_workflow.griptape_cloud_start_flow import GriptapeCloudStartFlow
 
 logger = logging.getLogger("griptape_nodes")
+
+# Prefix the generated script prints the saved workflow path with, so that the parent process
+# learns where the workflow actually landed instead of guessing at the path.
+SAVED_WORKFLOW_PATH_PREFIX = "GRIPTAPE_CLOUD_EXECUTOR_WORKFLOW_PATH="
 
 
 @dataclass
@@ -62,23 +71,63 @@ class GriptapeCloudWorkflowBuilder:
 
     def generate_executor_workflow(self) -> Path:
         """Generate an executor workflow that can invoke the published structure."""
+        project_file_path = self._get_current_project_file_path()
+
         # Generate a simple workflow creation script using PublishedWorkflow node
-        workflow_script = self._build_simple_workflow_script()
+        workflow_script = self._build_simple_workflow_script(project_file_path)
 
         # Execute the script in a subprocess to create the workflow
-        self._execute_workflow_script(workflow_script)
+        executor_workflow_path = self._execute_workflow_script(workflow_script)
 
         # Verify the workflow was created successfully
-        executor_workflow_path = Path(GriptapeNodes.ConfigManager().get_config_value("workspace_directory")) / (
-            self.workflow_builder_input.executor_workflow_name + ".py"
-        )
+        if executor_workflow_path is None:
+            executor_workflow_path = self._default_executor_workflow_path()
         if not executor_workflow_path.exists():
             error_msg = (
-                f"Executor workflow {self.workflow_builder_input.executor_workflow_name} was not created successfully."
+                f"Executor workflow {self.workflow_builder_input.executor_workflow_name} was not created successfully. "
+                f"Expected it at {executor_workflow_path}."
             )
             logger.error(error_msg)
             raise RuntimeError(error_msg)
+
+        # The engine re-registers the published workflow by file name against the workspace root,
+        # so a workflow saved anywhere else will not be found again.
+        workspace_path = GriptapeNodes.ConfigManager().workspace_path
+        if executor_workflow_path.parent.resolve() != workspace_path:
+            logger.warning(
+                "Executor workflow was saved to %s, outside the workspace directory %s. It may not be registered.",
+                executor_workflow_path,
+                workspace_path,
+            )
+
         return executor_workflow_path
+
+    def _default_executor_workflow_path(self) -> Path:
+        """Path the executor workflow is expected at when the subprocess did not report one."""
+        return GriptapeNodes.ConfigManager().workspace_path / (
+            self.workflow_builder_input.executor_workflow_name + ".py"
+        )
+
+    def _get_current_project_file_path(self) -> Path | None:
+        """Get the file path of the project active in this engine, if it has one.
+
+        The subprocess needs the same project as its parent so that the workspace directory
+        and the `save_workflow` situation resolve identically in both processes. Without it the
+        subprocess falls back to user-level config and saves the executor workflow somewhere
+        the parent is not looking for it.
+        """
+        current_project_result = GriptapeNodes.handle_request(GetCurrentProjectRequest())
+        if not isinstance(current_project_result, GetCurrentProjectResultSuccess):
+            logger.warning(
+                "Could not retrieve the current project: %s. The executor workflow will be generated without one.",
+                current_project_result,
+            )
+            return None
+
+        project_file_path = current_project_result.project_info.project_file_path
+        if project_file_path is None:
+            logger.debug("The current project is not backed by a file on disk; none will be passed to the subprocess.")
+        return project_file_path
 
     def _build_library_registration_script(self, libraries: list[str]) -> str:
         """Build a script to register libraries for the workflow.
@@ -129,11 +178,38 @@ class GriptapeCloudWorkflowBuilder:
 
         return input_params, output_params
 
-    def _build_script_header(self, libraries: list[str]) -> str:
+    def _build_project_activation_script(self, project_file_path: Path | None) -> str:
+        """Build a script to load and activate the parent engine's project.
+
+        The project must be activated before libraries are registered so that nodes which
+        resolve situations during init see the project's definitions, and so that the
+        `save_workflow` situation resolves to the same directory the parent engine uses.
+
+        Args:
+            project_file_path: Path to the parent engine's project file, if it has one
+
+        Returns:
+            Project activation script as string
+        """
+        if project_file_path is None:
+            return ""
+
+        return f"""
+    project_result = GriptapeNodes.handle_request(LoadProjectTemplateRequest(project_path=Path({str(project_file_path)!r})))
+    if isinstance(project_result, LoadProjectTemplateResultSuccess):
+        activate_result = GriptapeNodes.handle_request(SetCurrentProjectRequest(project_id=project_result.project_id))
+        if activate_result.failed():
+            print(f"Failed to activate project {str(project_file_path)!r}: {{activate_result}}")
+    else:
+        print(f"Failed to load project {str(project_file_path)!r}: {{project_result}}")
+"""
+
+    def _build_script_header(self, libraries: list[str], project_file_path: Path | None) -> str:
         """Build the header section of the workflow script.
 
         Args:
             libraries: List of libraries needed for the workflow
+            project_file_path: Path to the parent engine's project file, if it has one
 
         Returns:
             Script header as string
@@ -143,6 +219,8 @@ class GriptapeCloudWorkflowBuilder:
 Generated executor workflow for invoking published Griptape Cloud structure.
 This workflow was automatically created to execute structure: {self.workflow_builder_input.structure.structure_id}
 """
+
+from pathlib import Path
 
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.retained_mode.events.flow_events import CreateFlowRequest
@@ -155,10 +233,16 @@ from griptape_nodes.retained_mode.events.parameter_events import (
     AddParameterToNodeRequest,
     SetParameterValueRequest,
 )
+from griptape_nodes.retained_mode.events.project_events import (
+    LoadProjectTemplateRequest,
+    LoadProjectTemplateResultSuccess,
+    SetCurrentProjectRequest,
+)
 from griptape_nodes.retained_mode.events.connection_events import CreateConnectionRequest
 from griptape_nodes.retained_mode.events.workflow_events import SaveWorkflowRequest
 
 def main():
+    {self._build_project_activation_script(project_file_path)}
     {self._build_library_registration_script(libraries)}
 
     context_manager = GriptapeNodes.ContextManager()
@@ -446,6 +530,8 @@ def main():
         pickle_control_flow_result={self.workflow_builder_input.pickle_control_flow_result}))
 
     if save_response.succeeded():
+        # Report the saved path so the parent process does not have to guess at it.
+        print(f"{SAVED_WORKFLOW_PATH_PREFIX}{{save_response.file_path}}")
         print(f"Successfully created executor workflow: {self.workflow_builder_input.executor_workflow_name}")
     else:
         print(f"Failed to create executor workflow")
@@ -457,13 +543,12 @@ if __name__ == "__main__":
 
     def _build_simple_workflow_script(
         self,
+        project_file_path: Path | None = None,
     ) -> str:
         """Build a simple workflow creation script using PublishedWorkflow node.
 
         Args:
-            structure_id: The Griptape Cloud structure ID
-            workflow_shape: Input/output parameter structure
-            libraries: List of libraries needed for the workflow
+            project_file_path: Path to the parent engine's project file, if it has one
 
         Returns:
             Complete Python script as string
@@ -472,7 +557,7 @@ if __name__ == "__main__":
         input_params, output_params = self._extract_parameters_from_shape(self.workflow_builder_input.workflow_shape)
 
         # Build script sections
-        header = self._build_script_header(self.workflow_builder_input.libraries)
+        header = self._build_script_header(self.workflow_builder_input.libraries, project_file_path)
         nodes = self._build_node_creation_script()
         params = self._build_parameter_configuration_script(input_params, output_params)
         connections = self._build_connection_creation_script(input_params, output_params)
@@ -481,21 +566,32 @@ if __name__ == "__main__":
 
         return header + nodes + params + connections + start_flow_values + footer
 
-    def _execute_workflow_script(self, script: str) -> None:
-        """Execute the workflow creation script in a subprocess."""
+    def _execute_workflow_script(self, script: str) -> Path | None:
+        """Execute the workflow creation script in a subprocess.
+
+        Returns:
+            The path the subprocess saved the executor workflow to, or None if it did not report one.
+        """
         temp_script_path = Path(__file__).parent / f"temp_executor_{uuid.uuid4().hex}.py"
 
         try:
             with temp_script_path.open("w", encoding="utf-8") as f:
                 f.write(script)
 
-            # Execute the script in a subprocess to isolate the GriptapeNodes state
+            # Execute the script in a subprocess to isolate the GriptapeNodes state. The subprocess
+            # does not run engine app initialization, so it cannot derive the workspace directory
+            # from anything but user config; pass it explicitly so both processes agree on it.
+            subprocess_env = os.environ | {
+                "GTN_CONFIG_WORKSPACE_DIRECTORY": str(GriptapeNodes.ConfigManager().workspace_path),
+                "GTN_CONFIG_ENABLE_WORKSPACE_FILE_WATCHING": "false",
+            }
             result = subprocess.run(  # noqa: S603
                 [sys.executable, str(temp_script_path)],
                 capture_output=True,
                 text=True,
                 cwd=temp_script_path.parent,
                 timeout=300,
+                env=subprocess_env,
                 check=False,
             )
 
@@ -510,11 +606,28 @@ if __name__ == "__main__":
                 logger.error("Failed to generate executor workflow: %s", result.stderr)
                 raise RuntimeError(error_msg)
 
+            saved_workflow_path = self._parse_saved_workflow_path(result.stdout)
+            if saved_workflow_path is None:
+                logger.warning(
+                    "Executor workflow subprocess did not report where it saved the workflow. Subprocess output: %s %s",
+                    result.stdout,
+                    result.stderr,
+                )
+
             logger.info(
                 "Successfully generated executor workflow: %s", self.workflow_builder_input.executor_workflow_name
             )
+
+            return saved_workflow_path
 
         finally:
             # Clean up temporary script
             if temp_script_path.exists():
                 temp_script_path.unlink()
+
+    def _parse_saved_workflow_path(self, stdout: str) -> Path | None:
+        """Extract the path the subprocess saved the executor workflow to from its output."""
+        for line in reversed(stdout.splitlines()):
+            if line.startswith(SAVED_WORKFLOW_PATH_PREFIX):
+                return Path(line.removeprefix(SAVED_WORKFLOW_PATH_PREFIX).strip())
+        return None

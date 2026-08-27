@@ -32,6 +32,11 @@ logger = logging.getLogger("griptape_nodes")
 
 METADATA_SITUATION_NAME = "save_griptape_nodes_metadata"
 
+# Longest a single path component can be on the filesystems the engine runs on. Asking the OS about
+# a longer one raises instead of answering that it does not exist, so an output value that is really
+# text has to be told apart from a path before it is looked up.
+MAX_FILE_NAME_LENGTH = 255
+
 
 class GriptapeCloudEndFlow(EndNode, GriptapeCloudApiMixin):
     """End Flow node that uploads project output files to Griptape Cloud.
@@ -241,8 +246,13 @@ class GriptapeCloudEndFlow(EndNode, GriptapeCloudApiMixin):
             macro_string: The macro string to resolve
 
         Returns:
-            The resolved absolute Path, or None if resolution fails.
+            The resolved absolute Path, or None if the string could not name a file or resolution fails.
         """
+        # An output parameter holds whatever the workflow produced, and text is as common as a path,
+        # so rule out the values that could not name a file before resolving them.
+        if not self._might_name_a_file(macro_string):
+            return None
+
         try:
             parsed_macro = ParsedMacro(macro_string)
             result = GriptapeNodes.handle_request(GetPathForMacroRequest(parsed_macro=parsed_macro, variables={}))
@@ -252,6 +262,27 @@ class GriptapeCloudEndFlow(EndNode, GriptapeCloudApiMixin):
             return None
         else:
             return result.absolute_path
+
+    @staticmethod
+    def _might_name_a_file(value: str) -> bool:
+        """Check whether a string could name a file, before anything tries to resolve or look it up.
+
+        Resolving a value says only that it parses as a macro, not that the result is a path the OS
+        will answer questions about. Text resolves just as readily as a filename does, and the
+        generated model output an End Flow parameter usually carries resolves to a path so long that
+        asking whether it exists raises, which surfaces as a workflow error over a value that was
+        never meant to be a file.
+
+        Args:
+            value: The parameter value to judge.
+
+        Returns:
+            True if the value could name a file on disk.
+        """
+        if not value or "\x00" in value:
+            return False
+        # The limit is on bytes, and a file name can hold characters that take more than one.
+        return all(len(component.encode()) <= MAX_FILE_NAME_LENGTH for component in value.split("/"))
 
     def _is_existing_file(self, file_path: Path) -> bool:
         """Check if a path points to an existing file using the OS event system.
