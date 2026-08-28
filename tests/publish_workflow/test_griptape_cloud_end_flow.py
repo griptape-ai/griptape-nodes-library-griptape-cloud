@@ -27,13 +27,20 @@ GENERATED_TEXT = "# Cat\n\nA **cat** (*Felis catus*) is a small, domesticated ca
 # a path. Markdown links, dates, units and "and/or" all put slashes in ordinary output.
 GENERATED_TEXT_WITH_SLASHES = "Cats weigh 4/5 kg, live 12/18 years, and hunt day and/or night. " * 20
 
+# The largest path limit across the platforms the engine runs on: 1024 on macOS, 4096 on Linux. The
+# guard is set to the smallest of them, so it rejects values shorter than this that the local OS
+# would still answer about; text has to be longer than this to be refused wherever the test runs.
+LONGEST_PLATFORM_PATH_LENGTH = 4096
 
-@pytest.mark.parametrize(
+TEXT_SHAPES = pytest.mark.parametrize(
     "text",
     [GENERATED_TEXT, GENERATED_TEXT_WITH_SLASHES],
     ids=["one long component", "many short components"],
 )
-def test_generated_text_cannot_be_looked_up(text: str, tmp_path: Path) -> None:
+
+
+@TEXT_SHAPES
+def test_generated_text_cannot_be_looked_up(text: str) -> None:
     """Text on an output parameter is not treated as a candidate file, however it is punctuated.
 
     Text resolves to a path under the project directory the same way a file name does, and asking
@@ -43,8 +50,21 @@ def test_generated_text_cannot_be_looked_up(text: str, tmp_path: Path) -> None:
     limit alone lets the same failure through.
     """
     assert not GriptapeCloudEndFlow._can_be_looked_up(text)
+
+
+@TEXT_SHAPES
+def test_the_os_refuses_the_paths_the_guard_rejects(text: str, tmp_path: Path) -> None:
+    """Refusing to look a path up is standing in for a real refusal, whatever the punctuation.
+
+    The text is repeated past the largest limit any of the platforms enforces so that the refusal is
+    demonstrated wherever the test runs. The realistic lengths above are rejected by the guard well
+    before this point, which is the margin the guard is deliberately carrying.
+    """
+    over_long = text * (1 + LONGEST_PLATFORM_PATH_LENGTH // len(text))
+
+    assert not GriptapeCloudEndFlow._can_be_looked_up(over_long)
     with pytest.raises(OSError, match=r"[Ff]ile name too long"):
-        (tmp_path / text).exists()
+        (tmp_path / over_long).exists()
 
 
 def test_the_length_limits_are_the_ones_the_os_enforces(tmp_path: Path) -> None:
