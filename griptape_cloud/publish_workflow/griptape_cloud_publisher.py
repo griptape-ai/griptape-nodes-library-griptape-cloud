@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import importlib.metadata
 import json
 import logging
@@ -9,7 +10,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
+from urllib.request import url2pathname
 
 import yaml
 from dotenv import set_key
@@ -127,6 +129,26 @@ LIBRARY_COPY_IGNORE_PATTERNS = [
     ".mypy_cache",
     ".DS_Store",
 ]
+
+# Config keys that describe the publishing machine rather than the workflow, so they are left out of
+# the config packaged for the cloud runtime. `project_workspaces` maps local project paths to local
+# workspace directories, and `project_file` points at a project on the publishing machine; the cloud
+# worker loads the project template written into the bundle instead.
+MACHINE_SPECIFIC_CONFIG_KEYS = ("project_workspaces", "project_file")
+
+# Project template fields naming locations that exist only on the publishing machine, so they are
+# cleared from the template packaged for the cloud runtime. The cloud runtime sets its own workspace
+# directory and the workflow's libraries are packaged alongside it, and the packaged template is the
+# fully merged result of its parent chain, so the parent's values are already in it. Left set, each of
+# these keeps the cloud worker from using the project at all: a parent that is not in the cloud fails
+# the load, and a per-platform workspace_dir or libraries_dir that names no path for the cloud
+# runtime's platform fails activation.
+MACHINE_SPECIFIC_TEMPLATE_FIELDS = ("workspace_dir", "libraries_dir", "parent_project_path", "parent_project_id")
+
+# Distribution name of the engine, which is not the name of the `griptape_nodes` package it installs.
+# Looking the distribution up is how publishing tells a source checkout from a released install, and a
+# name that matches nothing reads as "not installed from a checkout" rather than as a failed lookup.
+ENGINE_DISTRIBUTION_NAME = "griptape-nodes-engine"
 
 
 class GriptapeCloudPublisher(GriptapeCloudApiMixin):
@@ -735,15 +757,16 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
 
         return library_paths
 
-    def _find_griptape_nodes_distribution(self) -> importlib.metadata.Distribution | None:
-        """Find the griptape_nodes distribution from the current executable's venv.
+    @staticmethod
+    def _find_griptape_nodes_distribution() -> importlib.metadata.Distribution | None:
+        """Find the engine distribution from the current executable's venv.
 
         Uses sys.executable to derive the venv site-packages path, scoping the
         search to avoid picking up distributions from other venvs that may have
         leaked onto sys.path via dynamic library loading.
 
         Returns:
-            The Distribution object for griptape_nodes, or None if not found.
+            The engine's Distribution object, or None if not found.
         """
         import sys
 
@@ -756,23 +779,69 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
         if not site_packages.exists():
             logger.debug("Venv site-packages not found at %s, falling back to default lookup", site_packages)
             try:
-                return importlib.metadata.distribution("griptape_nodes")
+                return importlib.metadata.distribution(ENGINE_DISTRIBUTION_NAME)
             except importlib.metadata.PackageNotFoundError:
                 return None
 
-        logger.debug("Searching for griptape_nodes in venv site-packages: %s", site_packages)
+        logger.debug("Searching for %s in venv site-packages: %s", ENGINE_DISTRIBUTION_NAME, site_packages)
         for dist in importlib.metadata.distributions(path=[str(site_packages)]):
-            if dist.metadata["Name"] == "griptape-nodes":
-                logger.debug("Found griptape_nodes at %s", dist.locate_file(""))
+            if dist.metadata["Name"] == ENGINE_DISTRIBUTION_NAME:
+                logger.debug("Found %s at %s", ENGINE_DISTRIBUTION_NAME, dist.locate_file(""))
                 return dist
 
-        logger.debug("griptape_nodes not found in venv site-packages, falling back to default lookup")
+        logger.debug("%s not found in venv site-packages, falling back to default lookup", ENGINE_DISTRIBUTION_NAME)
         try:
-            return importlib.metadata.distribution("griptape_nodes")
+            return importlib.metadata.distribution(ENGINE_DISTRIBUTION_NAME)
         except importlib.metadata.PackageNotFoundError:
             return None
 
-    def _get_install_source(self) -> tuple[Literal["git", "file", "pypi"], str | None]:
+    @staticmethod
+    def _warn_if_commit_is_not_installable(git_exe: str, source_dir: Path, commit: str) -> None:
+        """Warn when the revision publishing is about to pin cannot be installed from the remote.
+
+        The cloud build installs the engine by cloning the remote and checking this commit out, so a
+        commit that exists only in this checkout fails the build the same opaque way an untagged
+        version did. Uncommitted changes are invisible to the pin for the same reason: what runs in
+        the cloud is the commit, not the working tree. Neither is treated as an error, because a
+        commit can be pushed after publishing and before the build runs.
+
+        Args:
+            git_exe: Path to the git executable.
+            source_dir: The engine checkout the commit was resolved from.
+            commit: The commit publishing will pin.
+        """
+        try:
+            remote_branches = subprocess.check_output(  # noqa: S603
+                [git_exe, "-C", str(source_dir), "branch", "--remotes", "--contains", commit],
+                stderr=subprocess.DEVNULL,
+            ).decode()
+            # Tracked files only: untracked files are not part of the checkout and say nothing about
+            # whether the commit describes what is running.
+            modified_files = subprocess.check_output(  # noqa: S603
+                [git_exe, "-C", str(source_dir), "status", "--porcelain", "--untracked-files=no"],
+                stderr=subprocess.DEVNULL,
+            ).decode()
+        except (subprocess.CalledProcessError, OSError) as e:
+            logger.debug("Could not check whether engine commit %s can be installed from a remote: %s", commit, e)
+            return
+
+        if not remote_branches.strip():
+            logger.warning(
+                "Engine commit %s is on no remote branch known to %s. The published workflow installs the "
+                "engine by checking that commit out of the remote, so the deployment cannot build until it "
+                "is pushed.",
+                commit,
+                source_dir,
+            )
+        if modified_files.strip():
+            logger.warning(
+                "The engine checkout at %s has uncommitted changes. Publishing pins commit %s, so the "
+                "published workflow runs that commit rather than the working tree.",
+                source_dir,
+                commit,
+            )
+
+    def _get_install_source(self) -> tuple[Literal["git", "file", "pypi"], str | None]:  # noqa: PLR0911
         """Determines the install source of the Griptape Nodes package.
 
         Returns:
@@ -780,7 +849,14 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
         """
         dist = self._find_griptape_nodes_distribution()
         if dist is None:
-            logger.info("Could not find griptape_nodes distribution, assuming pypi install")
+            # The engine is running, so its distribution should always be installed. Being unable to
+            # find it means the version this publishes against is pinned by version number alone,
+            # which does not resolve for an engine built from a revision that was never tagged.
+            logger.warning(
+                "Could not find the '%s' distribution, so the engine version is assumed to be released. "
+                "Publishing will pin the engine by version number rather than by revision.",
+                ENGINE_DISTRIBUTION_NAME,
+            )
             return "pypi", None
         direct_url_text = dist.read_text("direct_url.json")
         logger.debug("griptape_nodes direct_url.json: %s", direct_url_text)
@@ -793,28 +869,38 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
         url = direct_url_info.get("url")
         logger.debug("griptape_nodes install URL: %s", url)
         if url.startswith("file://"):
+            git_exe = shutil.which("git")
+            if git_exe is None:
+                logger.info("File URL but git is not on PATH, so the commit cannot be resolved")
+                return "file", None
+            # For an editable install, dist.locate_file("") points at the site-packages of the venv
+            # the engine runs in rather than at the source checkout, and that venv can sit inside an
+            # unrelated repository — walking up from it finds no commit, or the wrong project's. The
+            # checkout is recorded in direct_url.json's url, so resolve the commit from there.
+            # `git -C` also handles a worktree, whose .git is a file rather than a directory.
+            source_dir = Path(url2pathname(urlparse(url).path))
+            logger.debug("Install source directory: %s", source_dir)
             try:
-                pkg_dir = Path(str(dist.locate_file(""))).resolve()
-                logger.debug("Package directory: %s", pkg_dir)
-                git_root = next(p for p in (pkg_dir, *pkg_dir.parents) if (p / ".git").is_dir())
-                logger.debug("Git root found: %s", git_root)
                 commit = (
-                    subprocess.check_output(
-                        ["git", "rev-parse", "--short", "HEAD"],  # noqa: S607
-                        cwd=git_root,
+                    subprocess.check_output(  # noqa: S603
+                        [git_exe, "-C", str(source_dir), "rev-parse", "HEAD"],
                         stderr=subprocess.DEVNULL,
                     )
                     .decode()
                     .strip()
                 )
-            except (StopIteration, subprocess.CalledProcessError) as e:
-                logger.info("File URL but no git repo or git command failed: %s", e)
+            except (subprocess.CalledProcessError, OSError) as e:
+                logger.info("File URL but %s is not a git checkout, or git failed: %s", source_dir, e)
                 return "file", None
             else:
-                logger.info("Detected git install source at %s (commit %s)", git_root, commit)
+                logger.info("Detected git install source at %s (commit %s)", source_dir, commit)
+                self._warn_if_commit_is_not_installable(git_exe, source_dir, commit)
                 return "git", commit
         if "vcs_info" in direct_url_info:
-            commit_id = direct_url_info["vcs_info"].get("commit_id", "")[:7]
+            commit_id = direct_url_info["vcs_info"].get("commit_id", "")
+            if not commit_id:
+                logger.info("Install URL %s records no commit, assuming pypi", url)
+                return "pypi", None
             logger.info("Detected vcs_info git install source at %s (commit %s)", url, commit_id)
             return "git", commit_id
         # Fall back to pypi if no other source is found
@@ -858,12 +944,16 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
         for key, val in env_file_dict.items():
             set_key(env_file_path, key, str(val))
 
-    def _write_project_template(self, bundle_dir: Path) -> None:
+    @staticmethod
+    def _write_project_template(bundle_dir: Path) -> None:
         """Write the current project template into the bundle for the cloud worker.
 
         The worker script loads this project file before registering libraries
         so that directory macros and situations (e.g. metadata sidecars) resolve
         correctly in the cloud runtime environment.
+
+        The fields naming locations on the publishing machine are cleared first, so that the worker
+        can load and activate the template on a machine that shares none of them.
 
         Args:
             bundle_dir: The directory where the bundle is being assembled.
@@ -876,11 +966,47 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
             )
             return
 
-        template = current_project_result.project_info.template.model_copy(deep=True)
+        template = current_project_result.project_info.template.model_copy(
+            deep=True, update=dict.fromkeys(MACHINE_SPECIFIC_TEMPLATE_FIELDS)
+        )
         project_yaml = template.to_yaml()
         project_yaml_path = bundle_dir / "project.yml"
         project_yaml_path.write_text(project_yaml, encoding="utf-8")
         logger.info("Wrote project template to %s", project_yaml_path)
+
+    @staticmethod
+    def _build_packaged_config(library_paths: list[str], packaged_top_level_dir: str) -> dict[str, Any]:
+        """Build the engine config to package alongside the workflow.
+
+        The cloud worker gets the config this engine is actually running with, rather than the user
+        config layer alone. Library settings are frequently set in a project-adjacent or workspace
+        `griptape_nodes_config.json`, and leaving those layers out makes the published workflow fall
+        back to defaults with no indication that it is running with different settings than it did
+        locally. The merged config is copied because the entries below overwrite it, and it belongs
+        to the running engine.
+
+        Args:
+            library_paths: Runtime paths of the libraries the cloud worker registers.
+            packaged_top_level_dir: The directory the package is unpacked to in the cloud runtime.
+
+        Returns:
+            The config to write into the package.
+        """
+        config = copy.deepcopy(GriptapeNodes.ConfigManager().merged_config)
+
+        for key in MACHINE_SPECIFIC_CONFIG_KEYS:
+            config.pop(key, None)
+
+        config["workspace_directory"] = packaged_top_level_dir
+        config["app_events"] = {
+            "on_app_initialization_complete": {
+                "workflows_to_register": [],
+                "libraries_to_register": library_paths,
+            }
+        }
+        config["enable_workspace_file_watching"] = False
+
+        return config
 
     def _package_workflow(self, workflow_name: str, start_flow_node: GriptapeCloudStartFlow | None) -> str:  # noqa: PLR0915
         config_manager = GriptapeNodes.ConfigManager()
@@ -921,9 +1047,6 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
         full_workflow_file_path = WorkflowRegistry.get_complete_file_path(workflow.file_path)
 
         env_file_mapping = self._get_merged_env_file_mapping(secrets_manager.workspace_env_path)
-
-        config = config_manager.user_config
-        config["workspace_directory"] = packaged_top_level_dir
 
         # Create a temporary directory to perform the packaging
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -987,13 +1110,7 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                     runtime_env_path=Path(packaged_top_level_dir) / "libraries",
                     workflow=workflow,
                 )
-                config["app_events"] = {
-                    "on_app_initialization_complete": {
-                        "workflows_to_register": [],
-                        "libraries_to_register": library_paths,
-                    }
-                }
-                config["enable_workspace_file_watching"] = False
+                config = self._build_packaged_config(library_paths, packaged_top_level_dir)
                 library_paths_formatted = [f'"{library_path}"' for library_path in library_paths]
 
                 with register_libraries_script_path.open("r", encoding="utf-8") as register_libraries_script_file:

@@ -32,6 +32,14 @@ logger = logging.getLogger("griptape_nodes")
 
 METADATA_SITUATION_NAME = "save_griptape_nodes_metadata"
 
+# Limits on the paths the OS will answer questions about. Exceeding either one raises ENAMETOOLONG
+# rather than reporting that the path does not exist, so an output value that is really text has to
+# be told apart from a path before it is looked up. The path limit is the smaller of the limits
+# across the platforms the engine runs on (1024 on macOS, 4096 on Linux); anything that long is text
+# rather than the path of a file to upload either way.
+MAX_FILE_NAME_LENGTH = 255
+MAX_PATH_LENGTH = 1024
+
 
 class GriptapeCloudEndFlow(EndNode, GriptapeCloudApiMixin):
     """End Flow node that uploads project output files to Griptape Cloud.
@@ -241,8 +249,14 @@ class GriptapeCloudEndFlow(EndNode, GriptapeCloudApiMixin):
             macro_string: The macro string to resolve
 
         Returns:
-            The resolved absolute Path, or None if resolution fails.
+            The resolved absolute Path, or None if the string could not name a file or resolution fails.
         """
+        # An output parameter holds whatever the workflow produced, and text is as common as a path.
+        # Resolving prepends a directory, so a value already past the limits resolves to a path that
+        # is too; ruling those out here saves resolving text that could never name a file.
+        if not self._can_be_looked_up(macro_string):
+            return None
+
         try:
             parsed_macro = ParsedMacro(macro_string)
             result = GriptapeNodes.handle_request(GetPathForMacroRequest(parsed_macro=parsed_macro, variables={}))
@@ -253,7 +267,31 @@ class GriptapeCloudEndFlow(EndNode, GriptapeCloudApiMixin):
         else:
             return result.absolute_path
 
-    def _is_existing_file(self, file_path: Path) -> bool:
+    @staticmethod
+    def _can_be_looked_up(path: str) -> bool:
+        """Check whether the OS can be asked about a path at all.
+
+        A path over either length limit raises out of the request handler instead of answering, and
+        the engine reports that as an unhandled exception against the workflow run. Generated model
+        output arrives on these parameters as often as file paths do and is long enough to cross both
+        limits, so it has to be recognized before the question is asked.
+
+        Args:
+            path: The path, or the value being treated as one, to judge.
+
+        Returns:
+            True if the OS will answer whether this path exists.
+        """
+        if not path or "\x00" in path:
+            return False
+        # The limits are on bytes, and a path can hold characters that take more than one.
+        encoded = path.encode()
+        if len(encoded) > MAX_PATH_LENGTH:
+            return False
+        return all(len(component) <= MAX_FILE_NAME_LENGTH for component in encoded.split(b"/"))
+
+    @staticmethod
+    def _is_existing_file(file_path: Path) -> bool:
         """Check if a path points to an existing file using the OS event system.
 
         Args:
@@ -262,6 +300,12 @@ class GriptapeCloudEndFlow(EndNode, GriptapeCloudApiMixin):
         Returns:
             True if the path exists and is a file.
         """
+        # The resolved path is what the OS is actually asked about, so it is what has to be within
+        # the limits. A value short enough to resolve can still resolve to a path that is not.
+        if not GriptapeCloudEndFlow._can_be_looked_up(str(file_path)):
+            logger.debug("Resolved path is longer than the OS can be asked about, so it names no file")
+            return False
+
         result = GriptapeNodes.handle_request(GetFileInfoRequest(path=str(file_path), workspace_only=False))
         if not isinstance(result, GetFileInfoResultSuccess) or result.file_entry is None:
             return False
