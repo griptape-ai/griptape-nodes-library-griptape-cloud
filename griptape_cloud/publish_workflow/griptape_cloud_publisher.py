@@ -795,6 +795,52 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
         except importlib.metadata.PackageNotFoundError:
             return None
 
+    @staticmethod
+    def _warn_if_commit_is_not_installable(git_exe: str, source_dir: Path, commit: str) -> None:
+        """Warn when the revision publishing is about to pin cannot be installed from the remote.
+
+        The cloud build installs the engine by cloning the remote and checking this commit out, so a
+        commit that exists only in this checkout fails the build the same opaque way an untagged
+        version did. Uncommitted changes are invisible to the pin for the same reason: what runs in
+        the cloud is the commit, not the working tree. Neither is treated as an error, because a
+        commit can be pushed after publishing and before the build runs.
+
+        Args:
+            git_exe: Path to the git executable.
+            source_dir: The engine checkout the commit was resolved from.
+            commit: The commit publishing will pin.
+        """
+        try:
+            remote_branches = subprocess.check_output(  # noqa: S603
+                [git_exe, "-C", str(source_dir), "branch", "--remotes", "--contains", commit],
+                stderr=subprocess.DEVNULL,
+            ).decode()
+            # Tracked files only: untracked files are not part of the checkout and say nothing about
+            # whether the commit describes what is running.
+            modified_files = subprocess.check_output(  # noqa: S603
+                [git_exe, "-C", str(source_dir), "status", "--porcelain", "--untracked-files=no"],
+                stderr=subprocess.DEVNULL,
+            ).decode()
+        except (subprocess.CalledProcessError, OSError) as e:
+            logger.debug("Could not check whether engine commit %s can be installed from a remote: %s", commit, e)
+            return
+
+        if not remote_branches.strip():
+            logger.warning(
+                "Engine commit %s is on no remote branch known to %s. The published workflow installs the "
+                "engine by checking that commit out of the remote, so the deployment cannot build until it "
+                "is pushed.",
+                commit,
+                source_dir,
+            )
+        if modified_files.strip():
+            logger.warning(
+                "The engine checkout at %s has uncommitted changes. Publishing pins commit %s, so the "
+                "published workflow runs that commit rather than the working tree.",
+                source_dir,
+                commit,
+            )
+
     def _get_install_source(self) -> tuple[Literal["git", "file", "pypi"], str | None]:  # noqa: PLR0911
         """Determines the install source of the Griptape Nodes package.
 
@@ -848,6 +894,7 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
                 return "file", None
             else:
                 logger.info("Detected git install source at %s (commit %s)", source_dir, commit)
+                self._warn_if_commit_is_not_installable(git_exe, source_dir, commit)
                 return "git", commit
         if "vcs_info" in direct_url_info:
             commit_id = direct_url_info["vcs_info"].get("commit_id", "")

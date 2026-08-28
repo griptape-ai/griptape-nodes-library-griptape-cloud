@@ -32,10 +32,13 @@ logger = logging.getLogger("griptape_nodes")
 
 METADATA_SITUATION_NAME = "save_griptape_nodes_metadata"
 
-# Longest a single path component can be on the filesystems the engine runs on. Asking the OS about
-# a longer one raises instead of answering that it does not exist, so an output value that is really
-# text has to be told apart from a path before it is looked up.
+# Limits on the paths the OS will answer questions about. Exceeding either one raises ENAMETOOLONG
+# rather than reporting that the path does not exist, so an output value that is really text has to
+# be told apart from a path before it is looked up. The path limit is the smaller of the limits
+# across the platforms the engine runs on (1024 on macOS, 4096 on Linux); anything that long is text
+# rather than the path of a file to upload either way.
 MAX_FILE_NAME_LENGTH = 255
+MAX_PATH_LENGTH = 1024
 
 
 class GriptapeCloudEndFlow(EndNode, GriptapeCloudApiMixin):
@@ -248,9 +251,10 @@ class GriptapeCloudEndFlow(EndNode, GriptapeCloudApiMixin):
         Returns:
             The resolved absolute Path, or None if the string could not name a file or resolution fails.
         """
-        # An output parameter holds whatever the workflow produced, and text is as common as a path,
-        # so rule out the values that could not name a file before resolving them.
-        if not self._might_name_a_file(macro_string):
+        # An output parameter holds whatever the workflow produced, and text is as common as a path.
+        # Resolving prepends a directory, so a value already past the limits resolves to a path that
+        # is too; ruling those out here saves resolving text that could never name a file.
+        if not self._can_be_looked_up(macro_string):
             return None
 
         try:
@@ -264,27 +268,30 @@ class GriptapeCloudEndFlow(EndNode, GriptapeCloudApiMixin):
             return result.absolute_path
 
     @staticmethod
-    def _might_name_a_file(value: str) -> bool:
-        """Check whether a string could name a file, before anything tries to resolve or look it up.
+    def _can_be_looked_up(path: str) -> bool:
+        """Check whether the OS can be asked about a path at all.
 
-        Resolving a value says only that it parses as a macro, not that the result is a path the OS
-        will answer questions about. Text resolves just as readily as a filename does, and the
-        generated model output an End Flow parameter usually carries resolves to a path so long that
-        asking whether it exists raises, which surfaces as a workflow error over a value that was
-        never meant to be a file.
+        A path over either length limit raises out of the request handler instead of answering, and
+        the engine reports that as an unhandled exception against the workflow run. Generated model
+        output arrives on these parameters as often as file paths do and is long enough to cross both
+        limits, so it has to be recognized before the question is asked.
 
         Args:
-            value: The parameter value to judge.
+            path: The path, or the value being treated as one, to judge.
 
         Returns:
-            True if the value could name a file on disk.
+            True if the OS will answer whether this path exists.
         """
-        if not value or "\x00" in value:
+        if not path or "\x00" in path:
             return False
-        # The limit is on bytes, and a file name can hold characters that take more than one.
-        return all(len(component.encode()) <= MAX_FILE_NAME_LENGTH for component in value.split("/"))
+        # The limits are on bytes, and a path can hold characters that take more than one.
+        encoded = path.encode()
+        if len(encoded) > MAX_PATH_LENGTH:
+            return False
+        return all(len(component) <= MAX_FILE_NAME_LENGTH for component in encoded.split(b"/"))
 
-    def _is_existing_file(self, file_path: Path) -> bool:
+    @staticmethod
+    def _is_existing_file(file_path: Path) -> bool:
         """Check if a path points to an existing file using the OS event system.
 
         Args:
@@ -293,6 +300,12 @@ class GriptapeCloudEndFlow(EndNode, GriptapeCloudApiMixin):
         Returns:
             True if the path exists and is a file.
         """
+        # The resolved path is what the OS is actually asked about, so it is what has to be within
+        # the limits. A value short enough to resolve can still resolve to a path that is not.
+        if not GriptapeCloudEndFlow._can_be_looked_up(str(file_path)):
+            logger.debug("Resolved path is longer than the OS can be asked about, so it names no file")
+            return False
+
         result = GriptapeNodes.handle_request(GetFileInfoRequest(path=str(file_path), workspace_only=False))
         if not isinstance(result, GetFileInfoResultSuccess) or result.file_entry is None:
             return False

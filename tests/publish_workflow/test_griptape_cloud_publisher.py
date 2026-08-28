@@ -12,6 +12,9 @@ structure is created and no package is built.
 
 import copy
 import json
+import logging
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -38,6 +41,28 @@ def _load_project_adjacent_config(config_manager: ConfigManager, project_dir: Pa
     project_dir.mkdir(parents=True, exist_ok=True)
     (project_dir / "griptape_nodes_config.json").write_text(json.dumps(config), encoding="utf-8")
     config_manager.load_project_config(project_dir)
+
+
+def _init_repo_with_a_commit(git_exe: str, repo_dir: Path) -> str:
+    """Make repo_dir a git checkout holding one commit and no remotes, and return the commit.
+
+    Identity and signing are passed per-command so the test does not depend on, or write to, the
+    developer's git configuration.
+    """
+    config = ["-c", "user.email=tests@example.com", "-c", "user.name=Tests", "-c", "commit.gpgsign=false"]
+    (repo_dir / "tracked.txt").write_text("tracked", encoding="utf-8")
+    for args in (
+        ["init", "--quiet"],
+        ["add", "tracked.txt"],
+        ["commit", "--quiet", "--message", "Initial commit"],
+    ):
+        subprocess.run([git_exe, "-C", str(repo_dir), *config, *args], check=True, capture_output=True)  # noqa: S603
+
+    return (
+        subprocess.check_output([git_exe, "-C", str(repo_dir), "rev-parse", "HEAD"])  # noqa: S603
+        .decode()
+        .strip()
+    )
 
 
 def _write_project(project_dir: Path, **fields: object) -> Path:
@@ -166,6 +191,47 @@ def test_the_engine_distribution_is_found() -> None:
 
     assert dist is not None, f"No distribution named '{ENGINE_DISTRIBUTION_NAME}' is installed."
     assert dist.metadata["Name"] == ENGINE_DISTRIBUTION_NAME
+
+
+def test_publishing_warns_when_the_pinned_commit_is_on_no_remote(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A commit that exists only locally is called out before the cloud build fails on it.
+
+    The published workflow installs the engine by checking the pinned commit out of the remote, so
+    an unpushed commit fails the deployment build with the same opaque `git checkout` error that a
+    version tag which was never cut did. A local warning costs a line; the build failure costs a
+    round trip through the cloud to diagnose.
+    """
+    git_exe = shutil.which("git")
+    assert git_exe is not None, "git is needed to resolve the engine revision publishing pins."
+    commit = _init_repo_with_a_commit(git_exe, tmp_path)
+
+    with caplog.at_level(logging.WARNING, logger="griptape_nodes"):
+        GriptapeCloudPublisher._warn_if_commit_is_not_installable(git_exe, tmp_path, commit)
+
+    assert "on no remote branch" in caplog.text
+    assert commit in caplog.text
+
+
+def test_publishing_warns_when_the_checkout_has_uncommitted_changes(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Changes that are not in the pinned commit do not reach the cloud, so they are called out.
+
+    Untracked files are left out of the check: they are not part of the checkout, and warning on
+    them would fire on every publish from a working directory.
+    """
+    git_exe = shutil.which("git")
+    assert git_exe is not None, "git is needed to resolve the engine revision publishing pins."
+    commit = _init_repo_with_a_commit(git_exe, tmp_path)
+    (tmp_path / "tracked.txt").write_text("changed", encoding="utf-8")
+    (tmp_path / "untracked.txt").write_text("new", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING, logger="griptape_nodes"):
+        GriptapeCloudPublisher._warn_if_commit_is_not_installable(git_exe, tmp_path, commit)
+
+    assert "uncommitted changes" in caplog.text
 
 
 @pytest.mark.usefixtures("isolated_config_manager")
