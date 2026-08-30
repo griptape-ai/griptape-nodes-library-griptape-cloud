@@ -8,7 +8,6 @@ from griptape_cloud.assistants.assistant_options import AssistantOptions
 from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
 
 logger = logging.getLogger("griptape_nodes")
-logger.setLevel(logging.INFO)
 
 
 class GetAssistant(BaseGriptapeCloudNode, DataNode):

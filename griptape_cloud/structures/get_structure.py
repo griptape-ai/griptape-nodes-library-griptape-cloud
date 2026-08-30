@@ -8,7 +8,6 @@ from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
 from griptape_cloud.structures.structure_options import StructureOptions
 
 logger = logging.getLogger("griptape_nodes")
-logger.setLevel(logging.INFO)
 
 
 class GetStructure(BaseGriptapeCloudNode, DataNode):

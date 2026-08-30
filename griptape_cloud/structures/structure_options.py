@@ -8,7 +8,6 @@ from griptape_nodes.exe_types.core_types import Parameter
 from griptape_nodes.traits.options import Options
 
 logger = logging.getLogger("griptape_nodes")
-logger.setLevel(logging.INFO)
 
 
 @dataclass(eq=False)

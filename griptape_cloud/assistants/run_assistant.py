@@ -1,4 +1,3 @@
-import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from griptape_cloud_client.types import Unset
@@ -9,9 +8,6 @@ from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
 
 if TYPE_CHECKING:
     from griptape_cloud_client.models.assistant_detail import AssistantDetail
-
-logger = logging.getLogger("griptape_nodes")
-logger.setLevel(logging.INFO)
 
 
 class RunAssistant(BaseGriptapeCloudNode, ControlNode):

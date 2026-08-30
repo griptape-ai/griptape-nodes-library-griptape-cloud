@@ -8,7 +8,6 @@ from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
 from griptape_cloud.buckets.bucket_options import BucketOptions
 
 logger = logging.getLogger("griptape_nodes")
-logger.setLevel(logging.INFO)
 
 
 class GetBucket(BaseGriptapeCloudNode, DataNode):
