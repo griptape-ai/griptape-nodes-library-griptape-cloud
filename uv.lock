@@ -427,13 +427,13 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "griptape-cloud-client" },
-    { name = "griptape-nodes-engine" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "griptape-nodes-engine" },
     { name = "mdformat" },
     { name = "openapi-python-client" },
     { name = "pyright" },
@@ -448,13 +448,13 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "griptape-cloud-client", specifier = ">=0.2.0" },
-    { name = "griptape-nodes-engine", specifier = ">=0.97.0" },
     { name = "python-dotenv", specifier = "==1.1.1" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "griptape-nodes-engine", specifier = ">=0.97.0" },
     { name = "mdformat", specifier = ">=0.7.22" },
     { name = "openapi-python-client", specifier = ">=0.24.3" },
     { name = "pyright", specifier = ">=1.1.396" },
