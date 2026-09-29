@@ -165,7 +165,6 @@ class GriptapeCloudPublisher(GriptapeCloudApiMixin):
         self._gtc_client = AuthenticatedClient(
             base_url=self._get_base_url(),
             token=self._get_secret("GT_CLOUD_API_KEY"),
-            verify_ssl=False,
         )
         self._gt_cloud_bucket_id: str | None = None
         self.pickle_control_flow_result = pickle_control_flow_result

@@ -26,7 +26,6 @@ class BaseGriptapeCloudNode(BaseNode, GriptapeCloudApiMixin):
         self.gtc_client = AuthenticatedClient(
             base_url=self.base_url,
             token=self._get_gt_cloud_api_key(),
-            verify_ssl=False,
         )
 
     def validate_before_workflow_run(self) -> list[Exception] | None:
