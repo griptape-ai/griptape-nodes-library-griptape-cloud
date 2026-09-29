@@ -68,7 +68,6 @@ class GriptapeCloudEndFlow(EndNode, GriptapeCloudApiMixin):
         self.gtc_client = AuthenticatedClient(
             base_url=DEFAULT_GRIPTAPE_CLOUD_URL,
             token=api_key,
-            verify_ssl=False,
         )
 
     async def aprocess(self) -> None:
