@@ -9,11 +9,17 @@ No Griptape Cloud API calls are made; only the structure metadata the generated 
 needed, so a stand-in structure is enough.
 """
 
+import ast
 import datetime
+import enum
 import json
+import textwrap
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
+from griptape.artifacts import ImageUrlArtifact
 from griptape_cloud_client.models.default_structure_code import DefaultStructureCode
 from griptape_cloud_client.models.structure_code_type_2 import StructureCodeType2
 from griptape_cloud_client.models.update_structure_response_content import UpdateStructureResponseContent
@@ -26,6 +32,7 @@ from griptape_nodes.retained_mode.events.project_events import (
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.retained_mode.managers.config_manager import ConfigManager
+from griptape_nodes.serialization.values import encode_value
 
 from griptape_cloud.publish_workflow.griptape_cloud_workflow_builder import (
     SAVED_WORKFLOW_PATH_PREFIX,
@@ -34,6 +41,18 @@ from griptape_cloud.publish_workflow.griptape_cloud_workflow_builder import (
 )
 
 LIBRARY_ROOT = Path(__file__).parents[2]
+
+
+class Color(enum.Enum):
+    RED = "red"
+    BLUE = "blue"
+
+
+START_FLOW_VALUES: dict[str, Any] = {
+    "image": ImageUrlArtifact("https://example.com/image.png"),
+    "color": Color.BLUE,
+    "size": (512, 768),
+}
 
 
 @pytest.fixture
@@ -161,3 +180,51 @@ def test_parse_saved_workflow_path(
 ) -> None:
     """The path the subprocess reports is read back out of its output."""
     assert GriptapeCloudWorkflowBuilder(builder_input)._parse_saved_workflow_path(stdout) == expected
+
+
+@pytest.mark.parametrize("pooled", [True, False], ids=["pooled", "default"])
+def test_start_flow_values_round_trip_through_generated_script(
+    builder_input: GriptapeCloudWorkflowBuilderInput, *, pooled: bool
+) -> None:
+    """Start Flow values that are not plain JSON reach the start node as the values they were.
+
+    Running the generated section sets each value from the pooled encoding, or from the default
+    written beside it when the pool misses. The section runs with only the names the generated
+    header imports, so a value written as its repr would fail to evaluate.
+    """
+    builder_input.griptape_cloud_start_flow_input = dict(START_FLOW_VALUES)
+    builder_input.griptape_cloud_start_flow_node_commands = SimpleNamespace(
+        set_parameter_value_commands=[
+            SimpleNamespace(
+                set_parameter_value_command=SimpleNamespace(parameter_name=name),
+                unique_value_uuid=f"uuid-{name}",
+            )
+            for name in START_FLOW_VALUES
+        ]
+    )
+    if pooled:
+        builder_input.unique_parameter_uuid_to_values = {
+            f"uuid-{name}": encode_value(value) for name, value in START_FLOW_VALUES.items()
+        }
+
+    builder = GriptapeCloudWorkflowBuilder(builder_input)
+    script = ast.parse(builder._build_simple_workflow_script(None))
+    header_imports = ast.Module(
+        body=[node for node in script.body if isinstance(node, ast.Import | ast.ImportFrom)], type_ignores=[]
+    )
+    namespace: dict[str, Any] = {}
+    exec(compile(header_imports, "<generated imports>", "exec"), namespace)  # noqa: S102
+
+    requests: list[Any] = []
+    namespace["GriptapeNodes"] = SimpleNamespace(handle_request=requests.append)
+    namespace["start_node_name"] = "Griptape Cloud Start Flow"
+    exec(textwrap.dedent(builder._build_start_flow_value_script()), namespace)  # noqa: S102
+
+    received = {request.parameter_name: request.value for request in requests}
+    assert received.keys() == START_FLOW_VALUES.keys()
+    image = received["image"]
+    assert isinstance(image, ImageUrlArtifact)
+    assert image.value == START_FLOW_VALUES["image"].value
+    assert received["color"] is Color.BLUE
+    assert received["size"] == (512, 768)
+    assert isinstance(received["size"], tuple)
