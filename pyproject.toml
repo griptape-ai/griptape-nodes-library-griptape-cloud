@@ -62,6 +62,9 @@ exclude = [
 "tests/**" = [
   "S101",  # Assertions are how tests assert
 ]
+"scripts/**" = [
+  "INP001",  # Run as scripts, not imported as a package
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
