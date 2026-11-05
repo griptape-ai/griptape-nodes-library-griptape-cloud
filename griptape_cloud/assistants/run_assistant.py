@@ -2,7 +2,7 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from griptape_cloud_client.types import Unset
-from griptape_nodes.exe_types.core_types import Parameter, ParameterGroup, ParameterList, ParameterMode
+from griptape_nodes.exe_types.core_types import NodeError, Parameter, ParameterGroup, ParameterList, ParameterMode
 from griptape_nodes.exe_types.node_types import ControlNode
 
 from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
@@ -76,21 +76,16 @@ class RunAssistant(BaseGriptapeCloudNode, ControlNode):
         events_group.ui_options = {"hide": True}  # Hide the events group by default.
         self.add_node_element(events_group)
 
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        exceptions = super().validate_before_workflow_run() or []
+    def validate_before_node_run(self) -> list[Exception] | None:
+        exceptions = super().validate_before_node_run() or []
+        if exceptions:
+            return exceptions
 
-        try:
-            if not self.get_parameter_value("assistant"):
-                msg = "Assistant is not set. Configure the Node with a valid Griptape Cloud Assistant before running."
-                exceptions.append(ValueError(msg))
+        if not self.get_parameter_value("assistant"):
+            exceptions.append(
+                NodeError("No assistant is connected. Connect one to 'assistant'.", fields={"parameter": "assistant"})
+            )
 
-            cast("AssistantDetail", self.get_parameter_value("assistant"))
-
-        except Exception as e:
-            # Add any exceptions to your list to return
-            exceptions.append(e)
-
-        # if there are exceptions, they will display when the user tries to run the flow with the node.
         return exceptions or None
 
     def _process(self) -> None:

@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
+from griptape_nodes.exe_types.core_types import NodeError, Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import DataNode
 
 from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
@@ -62,19 +62,18 @@ class GetStructure(BaseGriptapeCloudNode, DataNode):
             )
         )
 
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        exceptions = super().validate_before_workflow_run() or []
+    def validate_before_node_run(self) -> list[Exception] | None:
+        exceptions = super().validate_before_node_run() or []
+        if exceptions:
+            return exceptions
 
-        try:
-            if not self.get_parameter_value("structure_id"):
-                msg = "Structure ID is not set. Configure the Node with a valid Griptape Cloud Structure ID before running."
-                exceptions.append(ValueError(msg))
+        if not self.get_parameter_value("structure_id"):
+            exceptions.append(
+                NodeError(
+                    "No structure is selected. Choose one in 'structure_id'.", fields={"parameter": "structure_id"}
+                )
+            )
 
-        except Exception as e:
-            # Add any exceptions to your list to return
-            exceptions.append(e)
-
-        # if there are exceptions, they will display when the user tries to run the flow with the node.
         return exceptions or None
 
     def after_value_set(

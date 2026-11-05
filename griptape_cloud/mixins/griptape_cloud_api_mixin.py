@@ -1,26 +1,27 @@
 import logging
 import os
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from griptape_cloud_client.api.assets.create_asset import sync as create_asset
-from griptape_cloud_client.api.assets.create_asset_url import sync as create_asset_url
-from griptape_cloud_client.api.assistant_runs.create_assistant_run import sync as create_assistant_run
-from griptape_cloud_client.api.assistant_runs.get_assistant_run import sync as get_assistant_run
-from griptape_cloud_client.api.assistants.list_assistants import sync as list_assistants
-from griptape_cloud_client.api.buckets.create_bucket import sync as create_bucket
-from griptape_cloud_client.api.buckets.delete_bucket import sync as delete_bucket
-from griptape_cloud_client.api.buckets.get_bucket import sync as get_bucket
-from griptape_cloud_client.api.buckets.list_buckets import sync as list_buckets
-from griptape_cloud_client.api.buckets.update_bucket import sync as update_bucket
-from griptape_cloud_client.api.deployments.get_deployment import sync as get_deployment
-from griptape_cloud_client.api.deployments.list_structure_deployments import sync as list_structure_deployments
-from griptape_cloud_client.api.events.list_assistant_events import sync as list_assistant_events
-from griptape_cloud_client.api.events.list_events import sync as list_events
-from griptape_cloud_client.api.structure_runs.create_structure_run import sync as create_structure_run
-from griptape_cloud_client.api.structure_runs.get_structure_run import sync as get_structure_run
-from griptape_cloud_client.api.structures.list_structures import sync as list_structures
+import httpx
+from griptape_cloud_client.api.assets.create_asset import sync_detailed as create_asset
+from griptape_cloud_client.api.assets.create_asset_url import sync_detailed as create_asset_url
+from griptape_cloud_client.api.assistant_runs.create_assistant_run import sync_detailed as create_assistant_run
+from griptape_cloud_client.api.assistant_runs.get_assistant_run import sync_detailed as get_assistant_run
+from griptape_cloud_client.api.assistants.list_assistants import sync_detailed as list_assistants
+from griptape_cloud_client.api.buckets.create_bucket import sync_detailed as create_bucket
+from griptape_cloud_client.api.buckets.delete_bucket import sync_detailed as delete_bucket
+from griptape_cloud_client.api.buckets.get_bucket import sync_detailed as get_bucket
+from griptape_cloud_client.api.buckets.list_buckets import sync_detailed as list_buckets
+from griptape_cloud_client.api.buckets.update_bucket import sync_detailed as update_bucket
+from griptape_cloud_client.api.deployments.get_deployment import sync_detailed as get_deployment
+from griptape_cloud_client.api.deployments.list_structure_deployments import sync_detailed as list_structure_deployments
+from griptape_cloud_client.api.events.list_assistant_events import sync_detailed as list_assistant_events
+from griptape_cloud_client.api.events.list_events import sync_detailed as list_events
+from griptape_cloud_client.api.structure_runs.create_structure_run import sync_detailed as create_structure_run
+from griptape_cloud_client.api.structure_runs.get_structure_run import sync_detailed as get_structure_run
+from griptape_cloud_client.api.structures.list_structures import sync_detailed as list_structures
 from griptape_cloud_client.models.assert_url_operation import AssertUrlOperation
 from griptape_cloud_client.models.assistant_event_detail import AssistantEventDetail
 from griptape_cloud_client.models.client_error_response_content import ClientErrorResponseContent
@@ -71,7 +72,10 @@ from griptape_cloud_client.models.structure_deployment_detail import StructureDe
 from griptape_cloud_client.models.structure_run_status import StructureRunStatus
 from griptape_cloud_client.models.update_bucket_request_content import UpdateBucketRequestContent
 from griptape_cloud_client.models.update_bucket_response_content import UpdateBucketResponseContent
-from griptape_cloud_client.types import UNSET
+from griptape_cloud_client.types import UNSET, Response
+from griptape_nodes.exe_types.core_types import NodeError
+
+from griptape_cloud.node_errors import api_error, connection_error
 
 if TYPE_CHECKING:
     from griptape_cloud_client.client import AuthenticatedClient
@@ -98,30 +102,50 @@ class GriptapeCloudApiMixin:
             return f"{message} Errors: {response.errors}"
         return message
 
-    def _unwrap_response(self, response: Any, expected_type: type[T], action: str) -> T:
-        """Narrow an SDK response to the expected success type, or raise with a formatted error.
+    def _call_api(
+        self, endpoint: Callable[..., Response[Any]], expected_type: type[T], action: str, **kwargs: Any
+    ) -> T:
+        """Call an SDK endpoint and return its success model, or raise a NodeError.
 
-        SDK `sync` calls return either the success model, a `ClientErrorResponseContent` /
-        `ServiceErrorResponseContent` for 4xx/5xx, or `None` for unexpected statuses.
+        The SDK returns the success model for the expected status, a `ClientErrorResponseContent` or
+        `ServiceErrorResponseContent` for a documented error, and `None` for any other status. The
+        status code and request ID are only on the detailed response, so every call uses `sync_detailed`.
+
+        Args:
+            endpoint: A generated `sync_detailed` function.
+            expected_type: The success model.
+            action: What the call does, as a verb phrase such as "get bucket".
+            **kwargs: The endpoint's arguments. The client is added here.
         """
-        if isinstance(response, expected_type):
-            return response
-        msg = self.format_error_message_for_response(
-            f"Error {action}: unexpected response type {type(response)}.", response
+        try:
+            response = endpoint(client=self.gtc_client, **kwargs)
+        except httpx.TransportError as e:
+            raise connection_error(e) from e
+
+        if isinstance(response.parsed, expected_type):
+            return response.parsed
+        error = api_error(
+            status_code=int(response.status_code), content=response.content, headers=response.headers, action=action
         )
-        logger.error(msg)
-        raise TypeError(msg)
+        logger.error("Griptape Cloud request failed: %s", error)
+        raise error
 
     def _get_deployment(self, deployment_id: str) -> GetDeploymentResponseContent:
-        response = get_deployment(deployment_id=deployment_id, client=self.gtc_client)
-        return self._unwrap_response(response, GetDeploymentResponseContent, "getting deployment")
+        return self._call_api(
+            get_deployment, GetDeploymentResponseContent, "get deployment", deployment_id=deployment_id
+        )
 
     def _list_structure_deployments(
         self, structure_id: str, status: list[DeploymentStatus] | None = None
     ) -> ListStructureDeploymentsResponseContent:
         status_query = status or UNSET
-        response = list_structure_deployments(structure_id=structure_id, client=self.gtc_client, status=status_query)
-        return self._unwrap_response(response, ListStructureDeploymentsResponseContent, "listing structure deployments")
+        return self._call_api(
+            list_structure_deployments,
+            ListStructureDeploymentsResponseContent,
+            "list structure deployments",
+            structure_id=structure_id,
+            status=status_query,
+        )
 
     def _wait_for_structure_deployment(self, deployment_id: str, timeout: float = 60.0) -> GetDeploymentResponseContent:
         start_time = time.time()
@@ -133,9 +157,12 @@ class GriptapeCloudApiMixin:
 
             # Check timeout
             if time.time() - start_time > timeout:
-                msg = f"Timeout waiting for deployment {deployment_id} to reach terminal state"
-                logger.error(msg)
-                raise TimeoutError(msg)
+                msg = (
+                    f"The Griptape Cloud deployment did not finish within {timeout:g} seconds. "
+                    "Check its status in Griptape Cloud and run the node again."
+                )
+                logger.error("Timeout waiting for deployment %s to reach terminal state", deployment_id)
+                raise NodeError(msg, fields={"deployment_id": deployment_id, "status": str(response.status)})
 
             # Wait before next check
             time.sleep(1.0)
@@ -146,59 +173,61 @@ class GriptapeCloudApiMixin:
         response = self._list_structure_deployments(structure_id=structure_id)
         latest_deployment = max(response.deployments, key=lambda d: d.created_at, default=None)
         if latest_deployment is None:
-            msg = f"No deployments found for structure {structure_id}."
-            logger.error(msg)
-            raise ValueError(msg)
+            msg = "The structure has no deployments. Deploy it in Griptape Cloud, then run the node again."
+            logger.error("No deployments found for structure %s", structure_id)
+            raise NodeError(msg, fields={"structure_id": structure_id})
         return self._wait_for_structure_deployment(latest_deployment.deployment_id, timeout=timeout)
 
     def _list_buckets(self) -> ListBucketsResponseContent:
-        response = list_buckets(client=self.gtc_client, page=1, page_size=100)
-        return self._unwrap_response(response, ListBucketsResponseContent, "listing buckets")
+        return self._call_api(list_buckets, ListBucketsResponseContent, "list buckets", page=1, page_size=100)
 
     def _get_bucket(self, bucket_id: str) -> GetBucketResponseContent:
-        response = get_bucket(bucket_id=bucket_id, client=self.gtc_client)
-        return self._unwrap_response(response, GetBucketResponseContent, "getting bucket")
+        return self._call_api(get_bucket, GetBucketResponseContent, "get bucket", bucket_id=bucket_id)
 
     def _create_bucket(self, name: str) -> CreateBucketResponseContent:
-        response = create_bucket(body=CreateBucketRequestContent(name=name), client=self.gtc_client)
-        return self._unwrap_response(response, CreateBucketResponseContent, "creating bucket")
+        return self._call_api(
+            create_bucket, CreateBucketResponseContent, "create bucket", body=CreateBucketRequestContent(name=name)
+        )
 
     def _update_bucket(self, bucket_id: str, name: str) -> UpdateBucketResponseContent:
-        response = update_bucket(
+        return self._call_api(
+            update_bucket,
+            UpdateBucketResponseContent,
+            "update bucket",
             bucket_id=bucket_id,
             body=UpdateBucketRequestContent(name=name),
-            client=self.gtc_client,
         )
-        return self._unwrap_response(response, UpdateBucketResponseContent, "updating bucket")
 
     def _delete_bucket(self, bucket_id: str) -> None:
         delete_bucket(bucket_id=bucket_id, client=self.gtc_client)
 
     def _list_assistants(self) -> ListAssistantsResponseContent:
-        response = list_assistants(client=self.gtc_client, page=1, page_size=100)
-        return self._unwrap_response(response, ListAssistantsResponseContent, "listing assistants")
+        return self._call_api(list_assistants, ListAssistantsResponseContent, "list assistants", page=1, page_size=100)
 
     def _get_assistant_run(self, assistant_run_id: str) -> GetAssistantRunResponseContent:
-        response = get_assistant_run(assistant_run_id=assistant_run_id, client=self.gtc_client)
-        return self._unwrap_response(response, GetAssistantRunResponseContent, "getting assistant run")
+        return self._call_api(
+            get_assistant_run, GetAssistantRunResponseContent, "get assistant run", assistant_run_id=assistant_run_id
+        )
 
     def _create_assistant_run(self, assistant_id: str, args: list[str]) -> CreateAssistantRunResponseContent:
-        response = create_assistant_run(
+        return self._call_api(
+            create_assistant_run,
+            CreateAssistantRunResponseContent,
+            "create assistant run",
             assistant_id=assistant_id,
             body=CreateAssistantRunRequestContent(args=args),
-            client=self.gtc_client,
         )
-        return self._unwrap_response(response, CreateAssistantRunResponseContent, "creating assistant run")
 
     def _list_assistant_run_events(
         self, assistant_run_id: str, offset: float | None = None
     ) -> ListAssistantEventsResponseContent:
-        response = list_assistant_events(
+        return self._call_api(
+            list_assistant_events,
+            ListAssistantEventsResponseContent,
+            "list assistant run events",
             assistant_run_id=assistant_run_id,
             offset=str(offset) if offset is not None else UNSET,
-            client=self.gtc_client,
         )
-        return self._unwrap_response(response, ListAssistantEventsResponseContent, "listing assistant run events")
 
     def _poll_assistant_run_events(self, assistant_run_id: str) -> Generator[list[AssistantEventDetail], None, None]:
         run_completed = False
@@ -218,39 +247,42 @@ class GriptapeCloudApiMixin:
         asset_name: str,
         bucket_id: str,
     ) -> CreateAssetResponseContent:
-        response = create_asset(
+        return self._call_api(
+            create_asset,
+            CreateAssetResponseContent,
+            "create asset",
             bucket_id=bucket_id,
-            client=self.gtc_client,
             body=CreateAssetRequestContent(name=asset_name),
         )
-        return self._unwrap_response(response, CreateAssetResponseContent, "creating asset")
 
     def _create_asset_url(
         self, asset_name: str, bucket_id: str, operation: AssertUrlOperation = AssertUrlOperation.GET
     ) -> CreateAssetUrlResponseContent:
-        response = create_asset_url(
+        return self._call_api(
+            create_asset_url,
+            CreateAssetUrlResponseContent,
+            "create asset URL",
             bucket_id=bucket_id,
             name=asset_name,
-            client=self.gtc_client,
             body=CreateAssetUrlRequestContent(operation=operation),
         )
-        return self._unwrap_response(response, CreateAssetUrlResponseContent, "creating asset URL")
 
     def _list_structures(self) -> ListStructuresResponseContent:
-        response = list_structures(client=self.gtc_client, page=1, page_size=100)
-        return self._unwrap_response(response, ListStructuresResponseContent, "listing structures")
+        return self._call_api(list_structures, ListStructuresResponseContent, "list structures", page=1, page_size=100)
 
     def _create_structure_run(self, structure_id: str, args: list[str]) -> CreateStructureRunResponseContent:
-        response = create_structure_run(
+        return self._call_api(
+            create_structure_run,
+            CreateStructureRunResponseContent,
+            "create structure run",
             structure_id=structure_id,
             body=CreateStructureRunRequestContent(args=args),
-            client=self.gtc_client,
         )
-        return self._unwrap_response(response, CreateStructureRunResponseContent, "creating structure run")
 
     def _get_structure_run(self, structure_run_id: str) -> GetStructureRunResponseContent:
-        response = get_structure_run(structure_run_id=structure_run_id, client=self.gtc_client)
-        return self._unwrap_response(response, GetStructureRunResponseContent, "getting structure run")
+        return self._call_api(
+            get_structure_run, GetStructureRunResponseContent, "get structure run", structure_run_id=structure_run_id
+        )
 
     def _get_structure_run_bad_statuses(self) -> list[str]:
         return [StructureRunStatus.FAILED, StructureRunStatus.CANCELLED, StructureRunStatus.ERROR]
@@ -258,12 +290,13 @@ class GriptapeCloudApiMixin:
     def _list_structure_run_events(
         self, structure_run_id: str, offset: float | None = None
     ) -> ListEventsResponseContent:
-        response = list_events(
+        return self._call_api(
+            list_events,
+            ListEventsResponseContent,
+            "list structure run events",
             structure_run_id=structure_run_id,
             offset=str(offset) if offset is not None else UNSET,
-            client=self.gtc_client,
         )
-        return self._unwrap_response(response, ListEventsResponseContent, "listing structure run events")
 
     def _poll_structure_run_events(self, structure_run_id: str) -> Generator[list[EventDetail], None, None]:
         run_completed = False

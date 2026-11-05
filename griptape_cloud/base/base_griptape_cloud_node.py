@@ -3,10 +3,12 @@ import os
 
 from griptape_cloud_client.client import AuthenticatedClient
 from griptape_nodes.drivers.storage.griptape_cloud_storage_driver import GriptapeCloudStorageDriver
+from griptape_nodes.exe_types.core_types import NodeError
 from griptape_nodes.exe_types.node_types import BaseNode
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 from griptape_cloud.mixins.griptape_cloud_api_mixin import GriptapeCloudApiMixin
+from griptape_cloud.node_errors import api_error, missing_api_key_error
 
 DEFAULT_GRIPTAPE_CLOUD_URL = os.getenv("GT_CLOUD_BASE_URL", "https://cloud.griptape.ai")
 API_KEY_ENV_VAR = "GT_CLOUD_API_KEY"
@@ -23,25 +25,35 @@ class BaseGriptapeCloudNode(BaseNode, GriptapeCloudApiMixin):
             kwargs["name"] = name
         super().__init__(**kwargs)
         self.base_url = DEFAULT_GRIPTAPE_CLOUD_URL
-        self.gtc_client = AuthenticatedClient(
-            base_url=self.base_url,
-            token=self._get_gt_cloud_api_key(),
-        )
+        self._gtc_client: AuthenticatedClient | None = None
+        self._gtc_client_token: str | None = None
 
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        exceptions = []
+    @property
+    def gtc_client(self) -> AuthenticatedClient:  # pyright: ignore[reportIncompatibleVariableOverride]
+        """The API client, built from the key as it is now.
 
-        try:
-            self._get_gt_cloud_api_key()
-        except Exception as e:
-            exceptions.append(e)
+        The key is read when the client is first needed, not when the node is created. A node created
+        before the key was added can then still run, and a missing key is reported when the node runs.
+        """
+        token = self._get_gt_cloud_api_key()
+        if self._gtc_client is None or token != self._gtc_client_token:
+            self._gtc_client = AuthenticatedClient(base_url=self.base_url, token=token)
+            self._gtc_client_token = token
+        return self._gtc_client
 
-        return exceptions or None
+    def validate_before_node_run(self) -> list[Exception] | None:
+        """Report a missing API key first and on its own, so nothing else hides it."""
+        if not self._has_gt_cloud_api_key():
+            return [missing_api_key_error()]
+        return super().validate_before_node_run()
+
+    def _has_gt_cloud_api_key(self) -> bool:
+        return bool(GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR, should_error_on_not_found=False))
 
     def _get_gt_cloud_api_key(self) -> str:
-        if (api_key := GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)) is None:
-            msg = f"{API_KEY_ENV_VAR} not found by Griptape Secrets Manager"
-            raise KeyError(msg)
+        api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR, should_error_on_not_found=False)
+        if not api_key:
+            raise missing_api_key_error()
         return api_key
 
     def _get_default_bucket_id(self) -> str:
@@ -57,13 +69,26 @@ class BaseGriptapeCloudNode(BaseNode, GriptapeCloudApiMixin):
 
         # The generated client cannot parse the organizations response, so use the engine's
         # reader, which pulls default_bucket_id off the raw payload.
-        bucket_id = GriptapeCloudStorageDriver.get_default_bucket_id(
-            base_url=self.base_url, api_key=self._get_gt_cloud_api_key()
-        )
+        try:
+            bucket_id = GriptapeCloudStorageDriver.get_default_bucket_id(
+                base_url=self.base_url, api_key=self._get_gt_cloud_api_key()
+            )
+        except RuntimeError as e:
+            # The engine wraps the failed request, and the response is on the cause.
+            response = getattr(e.__cause__, "response", None)
+            if response is None:
+                msg = "Could not read your default bucket from Griptape Cloud. Run the node again."
+                raise NodeError(msg) from e
+            raise api_error(
+                status_code=int(response.status_code),
+                content=response.content,
+                headers=response.headers,
+                action="read your default bucket",
+            ) from e
         if not bucket_id:
             msg = (
-                f"No default Griptape Cloud Bucket available. Set the {BUCKET_ID_ENV_VAR} secret or configure the "
-                "Node with a Bucket."
+                "Your Griptape Cloud account has no default bucket. Connect a bucket to 'Bucket', "
+                f"or set the {BUCKET_ID_ENV_VAR} secret."
             )
-            raise ValueError(msg)
+            raise NodeError(msg)
         return bucket_id
