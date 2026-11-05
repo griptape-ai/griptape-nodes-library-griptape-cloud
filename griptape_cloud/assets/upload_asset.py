@@ -5,7 +5,7 @@ from typing import cast
 import requests
 from griptape_cloud_client.models.assert_url_operation import AssertUrlOperation
 from griptape_cloud_client.models.bucket_detail import BucketDetail
-from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
+from griptape_nodes.exe_types.core_types import NodeError, Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import ControlNode
 
 from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
@@ -73,22 +73,26 @@ class UploadAsset(BaseGriptapeCloudNode, ControlNode):
 
     def validate_before_node_run(self) -> list[Exception] | None:
         exceptions = super().validate_before_node_run() or []
+        if exceptions:
+            return exceptions
 
-        try:
-            if not self.get_parameter_value("asset_name"):
-                msg = "Asset name is not set. Configure the Node with a valid asset name before running."
-                exceptions.append(ValueError(msg))
+        if not self.get_parameter_value("asset_name"):
+            exceptions.append(
+                NodeError("No asset name is set. Enter one in 'asset_name'.", fields={"parameter": "asset_name"})
+            )
 
-            file_path = self.get_parameter_value("file_path")
-            if not file_path:
-                msg = "File path is not set. Configure the Node with a valid file path before running."
-                exceptions.append(ValueError(msg))
-            elif not Path(file_path).exists():
-                msg = f"File does not exist at path: {file_path}"
-                exceptions.append(FileNotFoundError(msg))
-
-        except Exception as e:
-            exceptions.append(e)
+        file_path = self.get_parameter_value("file_path")
+        if not file_path:
+            exceptions.append(
+                NodeError("No file is selected. Choose one in 'Path to File'.", fields={"parameter": "file_path"})
+            )
+        elif not Path(file_path).exists():
+            exceptions.append(
+                NodeError(
+                    f"The file '{file_path}' does not exist. Choose an existing file in 'Path to File'.",
+                    fields={"parameter": "file_path"},
+                )
+            )
 
         return exceptions or None
 
@@ -120,8 +124,13 @@ class UploadAsset(BaseGriptapeCloudNode, ControlNode):
                 with Path(file_path).open("rb") as file:
                     headers = upload_url_response.headers.to_dict() or {}
                     headers["Content-Type"] = content_type
-                    upload_response = requests.put(upload_url_response.url, data=file, headers=headers, timeout=300)
-                    upload_response.raise_for_status()
+                    try:
+                        upload_response = requests.put(upload_url_response.url, data=file, headers=headers, timeout=300)
+                        upload_response.raise_for_status()
+                    except requests.RequestException as e:
+                        raise NodeError.from_request_exception(
+                            e, provider="Griptape Cloud storage", key_refused=False
+                        ) from e
 
                 self.parameter_output_values["asset_name"] = asset_name
                 self.parameter_output_values["bucket"] = bucket

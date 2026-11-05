@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
+from griptape_nodes.exe_types.core_types import NodeError, Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import DataNode
 
 from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
@@ -60,16 +60,15 @@ class GetBucket(BaseGriptapeCloudNode, DataNode):
             )
         )
 
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        exceptions = super().validate_before_workflow_run() or []
+    def validate_before_node_run(self) -> list[Exception] | None:
+        exceptions = super().validate_before_node_run() or []
+        if exceptions:
+            return exceptions
 
-        try:
-            if not self.get_parameter_value("bucket_id"):
-                msg = "Bucket ID is not set. Configure the Node with a valid Griptape Cloud Bucket ID before running."
-                exceptions.append(ValueError(msg))
-
-        except Exception as e:
-            exceptions.append(e)
+        if not self.get_parameter_value("bucket_id"):
+            exceptions.append(
+                NodeError("No bucket is selected. Choose one in 'bucket_id'.", fields={"parameter": "bucket_id"})
+            )
 
         return exceptions or None
 

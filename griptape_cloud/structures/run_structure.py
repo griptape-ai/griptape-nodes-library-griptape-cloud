@@ -2,7 +2,7 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from griptape_cloud_client.types import Unset
-from griptape_nodes.exe_types.core_types import Parameter, ParameterGroup, ParameterList, ParameterMode
+from griptape_nodes.exe_types.core_types import NodeError, Parameter, ParameterGroup, ParameterList, ParameterMode
 from griptape_nodes.exe_types.node_types import ControlNode
 
 from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
@@ -76,26 +76,37 @@ class RunStructure(BaseGriptapeCloudNode, ControlNode):
         events_group.ui_options = {"hide": True}  # Hide the events group by default.
         self.add_node_element(events_group)
 
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        exceptions = super().validate_before_workflow_run() or []
+    def validate_before_node_run(self) -> list[Exception] | None:
+        exceptions = super().validate_before_node_run() or []
+        if exceptions:
+            return exceptions
+
+        structure = cast("StructureDetail | None", self.get_parameter_value("structure"))
+        if not structure:
+            return [
+                NodeError("No structure is connected. Connect one to 'structure'.", fields={"parameter": "structure"})
+            ]
 
         try:
-            if not self.get_parameter_value("structure"):
-                msg = "Structure is not set. Configure the Node with a valid Griptape Cloud Structure before running."
-                exceptions.append(ValueError(msg))
-
-            structure = cast("StructureDetail", self.get_parameter_value("structure"))
-
             deployment = self._get_deployment(structure.latest_deployment_id)
-            if not self._is_deployment_ready(deployment):
-                msg = f"Structure '{structure.name}' is not ready. Deployment status: {deployment.status}"
-                exceptions.append(ValueError(msg))
-
         except Exception as e:
-            # Add any exceptions to your list to return
-            exceptions.append(e)
+            return [e]
+        if not self._is_deployment_ready(deployment):
+            msg = (
+                f"Structure '{structure.name}' is not ready. Its deployment status is {deployment.status}. "
+                "Wait for the deployment to succeed, then run the node again."
+            )
+            exceptions.append(
+                NodeError(
+                    msg,
+                    fields={
+                        "structure_id": structure.structure_id,
+                        "deployment_id": structure.latest_deployment_id,
+                        "status": str(deployment.status),
+                    },
+                )
+            )
 
-        # if there are exceptions, they will display when the user tries to run the flow with the node.
         return exceptions or None
 
     def _process(self) -> None:
