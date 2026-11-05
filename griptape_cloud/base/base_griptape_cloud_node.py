@@ -8,7 +8,7 @@ from griptape_nodes.exe_types.node_types import BaseNode
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 from griptape_cloud.mixins.griptape_cloud_api_mixin import GriptapeCloudApiMixin
-from griptape_cloud.node_errors import API_KEY_NAME, API_KEY_URL, PROVIDER
+from griptape_cloud.node_errors import API_KEY_NAME, API_KEY_URL, PROVIDER, api_error
 
 DEFAULT_GRIPTAPE_CLOUD_URL = os.getenv("GT_CLOUD_BASE_URL", "https://cloud.griptape.ai")
 API_KEY_ENV_VAR = API_KEY_NAME
@@ -37,7 +37,9 @@ class BaseGriptapeCloudNode(BaseNode, GriptapeCloudApiMixin):
         """
         token = self._get_gt_cloud_api_key()
         if self._gtc_client is None or token != self._gtc_client_token:
-            self._gtc_client = AuthenticatedClient(base_url=self.base_url, token=token)
+            self._gtc_client = AuthenticatedClient(
+                base_url=self.base_url, token=token, httpx_args={"event_hooks": {"response": [self._remember_response]}}
+            )
             self._gtc_client_token = token
         return self._gtc_client
 
@@ -73,9 +75,14 @@ class BaseGriptapeCloudNode(BaseNode, GriptapeCloudApiMixin):
             bucket_id = GriptapeCloudStorageDriver.get_default_bucket_id(
                 base_url=self.base_url, api_key=self._get_gt_cloud_api_key()
             )
-        except RuntimeError as e:
-            # The engine wraps the failed request, and the response is on the cause.
+        except NodeError:
+            raise
+        except Exception as e:
+            # The engine wraps a failed request in a RuntimeError with the response on the cause. A body it
+            # can't read raises a ValueError or AttributeError, and a failed connection its own error.
             cause = e.__cause__ if isinstance(e.__cause__, Exception) else e
+            if isinstance(cause, ValueError | KeyError | TypeError | AttributeError):
+                raise api_error(None, "read your default bucket") from e
             raise NodeError.from_request_exception(cause, provider=PROVIDER, secret_name=API_KEY_NAME) from e
         if not bucket_id:
             msg = (

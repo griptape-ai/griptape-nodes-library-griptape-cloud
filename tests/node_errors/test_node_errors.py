@@ -62,7 +62,11 @@ def server() -> Iterator[HTTPServer]:
 
 class _Api(GriptapeCloudApiMixin):
     def __init__(self, base_url: str) -> None:
-        self.gtc_client = AuthenticatedClient(base_url=base_url, token="bad-token")  # noqa: S106
+        self.gtc_client = AuthenticatedClient(
+            base_url=base_url,
+            token="bad-token",  # noqa: S106
+            httpx_args={"event_hooks": {"response": [self._remember_response]}},
+        )
 
 
 def _api(server: HTTPServer) -> _Api:
@@ -96,6 +100,22 @@ def test_not_found_names_the_action_and_the_reason(server: HTTPServer) -> None:
     assert exc.value.fields["status_code"] == 404
     assert exc.value.fields["error_code"] == "not_found"
     assert exc.value.links == []
+
+
+@pytest.mark.parametrize("status", [200, 401, 404, 500, 502])
+@pytest.mark.parametrize("body", [b"<html>Bad gateway</html>", b"", [1, 2]], ids=["html", "empty", "list"])
+def test_a_body_the_sdk_cannot_parse_is_a_node_error(server: HTTPServer, status: int, body: Any) -> None:
+    """The SDK parses the body inside the call, so a ValueError, KeyError or AttributeError must not escape."""
+    _reply(status, body)
+    with pytest.raises(NodeError) as exc:
+        _api(server)._list_buckets()
+
+    assert exc.value.__cause__ is None or isinstance(
+        exc.value.__cause__, (ValueError, KeyError, TypeError, AttributeError)
+    )
+    assert exc.value.fields.get("status_code") in {None, status}
+    if status == 401:
+        assert exc.value.links
 
 
 def test_forbidden_is_not_a_refused_key(server: HTTPServer) -> None:

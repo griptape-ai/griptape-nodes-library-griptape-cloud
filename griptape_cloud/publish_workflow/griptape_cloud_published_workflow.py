@@ -166,7 +166,7 @@ class GriptapeCloudPublishedWorkflow(SuccessFailureNode, BaseGriptapeCloudNode):
             list_structure_deployments_response = self._list_structure_deployments(
                 structure_id=structure_id, status=[DeploymentStatus.SUCCEEDED]
             )
-        except NodeError as e:
+        except Exception as e:
             return [e]
         if not any(
             self._is_deployment_ready(deployment) for deployment in list_structure_deployments_response.deployments

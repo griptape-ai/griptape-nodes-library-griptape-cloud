@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import time
 from collections.abc import Callable, Generator
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -90,6 +91,17 @@ class GriptapeCloudApiMixin:
 
     gtc_client: "AuthenticatedClient"
 
+    @property
+    def _last_http_response(self) -> threading.local:
+        """The last response each thread received, kept by the client's response hook."""
+        if "_last_http_response_local" not in self.__dict__:
+            self.__dict__["_last_http_response_local"] = threading.local()
+        return self.__dict__["_last_http_response_local"]
+
+    def _remember_response(self, response: httpx.Response) -> None:
+        response.read()
+        self._last_http_response.response = response
+
     @staticmethod
     def is_executing_in_structure_runtime() -> bool:
         """Check if the current process is running inside a Griptape Cloud worker."""
@@ -117,10 +129,16 @@ class GriptapeCloudApiMixin:
             action: What the call does, as a verb phrase such as "get bucket".
             **kwargs: The endpoint's arguments. The client is added here.
         """
+        client = self.gtc_client
+        self._last_http_response.response = None
         try:
-            response = endpoint(client=self.gtc_client, **kwargs)
+            response = endpoint(client=client, **kwargs)
         except httpx.TransportError as e:
             raise NodeError.from_request_exception(e, provider=PROVIDER, secret_name=API_KEY_NAME) from e
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            # The SDK parses the body of every status it has a model for, so an HTML page, an empty body
+            # or a list where an object was expected fails inside the call. The hook kept the response.
+            raise api_error(self._last_http_response.response, action) from e
 
         if isinstance(response.parsed, expected_type):
             return response.parsed

@@ -89,7 +89,7 @@ class RunStructure(BaseGriptapeCloudNode, ControlNode):
 
         try:
             deployment = self._get_deployment(structure.latest_deployment_id)
-        except NodeError as e:
+        except Exception as e:
             return [e]
         if not self._is_deployment_ready(deployment):
             msg = (

@@ -9,6 +9,7 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 from griptape_cloud_client.types import Response
 from griptape_nodes.exe_types.core_types import NodeError
 
@@ -19,13 +20,16 @@ PROVIDER = "Griptape Cloud"
 HTTP_UNAUTHORIZED = 401
 
 
-def api_error(response: Response[Any], action: str) -> NodeError:
+def api_error(response: Response[Any] | httpx.Response | None, action: str) -> NodeError:
     """The error for a response the node can't use.
 
     Args:
-        response: A `sync_detailed` response.
+        response: A `sync_detailed` response, or the raw response when the SDK could not parse it. None
+            when there is no response, which gives a message that says so.
         action: What the call does, as a verb phrase such as "get bucket".
     """
+    if response is None:
+        return NodeError(f"{PROVIDER} sent a response the node could not read while trying to {action}.")
     status = int(response.status_code)
     text = response.content.decode("utf-8", errors="replace")
     adapter = SimpleNamespace(status_code=status, headers=response.headers, text=text, json=lambda: _json(text))
