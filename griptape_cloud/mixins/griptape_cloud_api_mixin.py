@@ -137,7 +137,10 @@ class GriptapeCloudApiMixin:
             raise NodeError.from_request_exception(e, provider=PROVIDER, secret_name=API_KEY_NAME) from e
         except (ValueError, KeyError, TypeError, AttributeError) as e:
             # The SDK parses the body of every status it has a model for, so an HTML page, an empty body
-            # or a list where an object was expected fails inside the call. The hook kept the response.
+            # or a list where an object was expected fails inside the call, after the hook kept the response.
+            # Without a response the error came from our own code, so it is not blamed on Griptape Cloud.
+            if self._last_http_response.response is None:
+                raise
             raise api_error(self._last_http_response.response, action) from e
 
         if isinstance(response.parsed, expected_type):

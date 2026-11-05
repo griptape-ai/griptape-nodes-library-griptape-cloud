@@ -181,3 +181,33 @@ def test_node_files_load_the_way_the_engine_loads_them(monkeypatch: pytest.Monke
         assert spec is not None
         assert spec.loader is not None
         spec.loader.exec_module(importlib.util.module_from_spec(spec))
+
+
+def test_a_local_error_before_the_request_is_not_blamed_on_griptape_cloud(server: HTTPServer) -> None:
+    api = _api(server)
+
+    def endpoint(**_kwargs: Any) -> None:
+        msg = "unexpected keyword argument"
+        raise TypeError(msg)
+
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        api._call_api(endpoint, object, "list buckets")
+
+
+@pytest.mark.parametrize("body", [b"<html>Bad gateway</html>", b"", [1, 2]], ids=["html", "empty", "list"])
+def test_a_local_error_after_a_successful_call_does_not_reuse_its_response(server: HTTPServer, body: Any) -> None:
+    """The response kept for the last call is cleared first, so it can't be blamed for a later local error."""
+    api = _api(server)
+    _reply(200, {"buckets": [], "pagination": {"page_number": 1, "page_size": 100, "total_count": 0, "total_pages": 0}})
+    api._list_buckets()
+
+    def endpoint(**_kwargs: Any) -> None:
+        msg = "unexpected keyword argument"
+        raise TypeError(msg)
+
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        api._call_api(endpoint, object, "list buckets")
+
+    _reply(200, body)
+    with pytest.raises(NodeError, match="could not read"):
+        api._list_buckets()
