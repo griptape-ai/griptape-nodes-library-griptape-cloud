@@ -8,10 +8,10 @@ from griptape_nodes.exe_types.node_types import BaseNode
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 from griptape_cloud.mixins.griptape_cloud_api_mixin import GriptapeCloudApiMixin
-from griptape_cloud.node_errors import api_error, missing_api_key_error
+from griptape_cloud.node_errors import API_KEY_NAME, API_KEY_URL, PROVIDER
 
 DEFAULT_GRIPTAPE_CLOUD_URL = os.getenv("GT_CLOUD_BASE_URL", "https://cloud.griptape.ai")
-API_KEY_ENV_VAR = "GT_CLOUD_API_KEY"
+API_KEY_ENV_VAR = API_KEY_NAME
 BUCKET_ID_ENV_VAR = "GT_CLOUD_BUCKET_ID"
 SERVICE = "Griptape"
 
@@ -44,7 +44,7 @@ class BaseGriptapeCloudNode(BaseNode, GriptapeCloudApiMixin):
     def validate_before_node_run(self) -> list[Exception] | None:
         """Report a missing API key first and on its own, so nothing else hides it."""
         if not self._has_gt_cloud_api_key():
-            return [missing_api_key_error()]
+            return [NodeError.from_missing_secret(API_KEY_NAME, key_url=API_KEY_URL)]
         return super().validate_before_node_run()
 
     def _has_gt_cloud_api_key(self) -> bool:
@@ -53,7 +53,7 @@ class BaseGriptapeCloudNode(BaseNode, GriptapeCloudApiMixin):
     def _get_gt_cloud_api_key(self) -> str:
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR, should_error_on_not_found=False)
         if not api_key:
-            raise missing_api_key_error()
+            raise NodeError.from_missing_secret(API_KEY_NAME, key_url=API_KEY_URL)
         return api_key
 
     def _get_default_bucket_id(self) -> str:
@@ -75,16 +75,8 @@ class BaseGriptapeCloudNode(BaseNode, GriptapeCloudApiMixin):
             )
         except RuntimeError as e:
             # The engine wraps the failed request, and the response is on the cause.
-            response = getattr(e.__cause__, "response", None)
-            if response is None:
-                msg = "Could not read your default bucket from Griptape Cloud. Run the node again."
-                raise NodeError(msg) from e
-            raise api_error(
-                status_code=int(response.status_code),
-                content=response.content,
-                headers=response.headers,
-                action="read your default bucket",
-            ) from e
+            cause = e.__cause__ if isinstance(e.__cause__, Exception) else e
+            raise NodeError.from_request_exception(cause, provider=PROVIDER, secret_name=API_KEY_NAME) from e
         if not bucket_id:
             msg = (
                 "Your Griptape Cloud account has no default bucket. Connect a bucket to 'Bucket', "

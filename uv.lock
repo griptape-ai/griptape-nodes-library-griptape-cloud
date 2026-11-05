@@ -446,7 +446,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "griptape-nodes-engine", specifier = ">=0.104.0" },
+    { name = "griptape-nodes-engine", specifier = ">=0.105.0" },
     { name = "mdformat", specifier = ">=0.7.22" },
     { name = "openapi-python-client", specifier = ">=0.24.3" },
     { name = "pyright", specifier = ">=1.1.396" },

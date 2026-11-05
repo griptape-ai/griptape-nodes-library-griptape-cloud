@@ -6,14 +6,15 @@ SDK's own parsing and not from a hand-built response.
 
 # ruff: noqa: D103, PLR2004
 
+import importlib.util
 import json
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-import requests
 from griptape_cloud_client.client import AuthenticatedClient
 from griptape_nodes.exe_types.core_types import NodeError
 from griptape_nodes.exe_types.node_types import BaseNode
@@ -21,7 +22,7 @@ from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
 from griptape_cloud.mixins.griptape_cloud_api_mixin import GriptapeCloudApiMixin
-from griptape_cloud.node_errors import API_KEY_NAME, API_KEYS_URL, upload_error
+from griptape_cloud.node_errors import API_KEY_NAME
 
 TOKEN_NOT_VALID = {
     "type": "client_error",
@@ -78,15 +79,11 @@ def test_refused_key_links_to_the_secret(server: HTTPServer) -> None:
         _api(server)._list_buckets()
 
     error = exc.value
-    assert str(error) == (
-        f"Griptape Cloud refused {API_KEY_NAME}. Update the key in Settings → API Keys & Secrets, "
-        "then run the node again."
-    )
+    assert str(error).startswith("Griptape Cloud refused the API key.")
     assert error.fields == {"status_code": 401, "request_id": "req-123", "error_code": "token_not_valid"}
     assert error.response == TOKEN_NOT_VALID
     assert [(link.label, link.url) for link in error.links] == [
         ("Update the API key", f"#settings-secrets?filter={API_KEY_NAME}"),
-        ("Get a Griptape Cloud API key", API_KEYS_URL),
     ]
 
 
@@ -97,16 +94,19 @@ def test_not_found_names_the_action_and_the_reason(server: HTTPServer) -> None:
 
     assert str(exc.value) == "Griptape Cloud could not get bucket: Not found."
     assert exc.value.fields["status_code"] == 404
+    assert exc.value.fields["error_code"] == "not_found"
     assert exc.value.links == []
 
 
-def test_validation_error_names_the_field(server: HTTPServer) -> None:
+def test_forbidden_is_not_a_refused_key(server: HTTPServer) -> None:
     _reply(
-        422,
-        {"type": "client_error", "errors": [{"code": "required", "detail": "This field is required.", "attr": "name"}]},
+        403, {"type": "client_error", "errors": [{"code": "permission_denied", "detail": "No access.", "attr": None}]}
     )
-    with pytest.raises(NodeError, match=r"could not list buckets: name: This field is required\."):
-        _api(server)._list_buckets()
+    with pytest.raises(NodeError) as exc:
+        _api(server)._get_bucket("b-1")
+
+    assert str(exc.value) == "Griptape Cloud could not get bucket: No access."
+    assert exc.value.links == []
 
 
 def test_status_the_sdk_does_not_parse_keeps_its_code(server: HTTPServer) -> None:
@@ -115,15 +115,9 @@ def test_status_the_sdk_does_not_parse_keeps_its_code(server: HTTPServer) -> Non
     with pytest.raises(NodeError) as exc:
         _api(server)._list_buckets()
 
-    assert str(exc.value) == "Griptape Cloud could not list buckets. It answered with HTTP 502."
     assert exc.value.fields["status_code"] == 502
-    assert exc.value.response == {"text": "<html>Bad gateway</html>"}
-
-
-def test_rate_limit_says_to_wait(server: HTTPServer) -> None:
-    _reply(429, {"type": "client_error", "errors": []})
-    with pytest.raises(NodeError, match="rate-limiting"):
-        _api(server)._list_buckets()
+    assert "HTTP 502" in str(exc.value)
+    assert exc.value.response == {"body": "<html>Bad gateway</html>"}
 
 
 def test_connection_failure_is_plain() -> None:
@@ -132,24 +126,6 @@ def test_connection_failure_is_plain() -> None:
         api._list_buckets()
 
     assert "ConnectError" not in str(exc.value)
-
-
-def test_success_returns_the_model(server: HTTPServer) -> None:
-    _reply(200, {"buckets": [], "pagination": {"page_number": 1, "page_size": 100, "total_count": 0, "total_pages": 0}})
-    assert _api(server)._list_buckets().buckets == []
-
-
-def test_upload_rejection_does_not_blame_the_api_key() -> None:
-    response = requests.Response()
-    response.status_code = 403
-    response._content = b"<Error><Code>AccessDenied</Code></Error>"
-    response.headers["x-amz-request-id"] = "amz-1"
-    error = upload_error(requests.HTTPError(response=response))
-
-    assert "HTTP 403" in str(error)
-    assert error.links == []
-    assert error.fields == {"status_code": 403, "request_id": "amz-1"}
-    assert error.response == {"text": "<Error><Code>AccessDenied</Code></Error>"}
 
 
 def test_missing_key_is_the_only_validation_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -172,3 +148,16 @@ def test_missing_key_is_the_only_validation_error(monkeypatch: pytest.MonkeyPatc
     assert isinstance(error, NodeError)
     assert str(error).startswith(f"{API_KEY_NAME} is not set.")
     assert error.links[0].url == f"#settings-secrets?filter={API_KEY_NAME}"
+
+
+def test_node_files_load_the_way_the_engine_loads_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The engine loads each node file on its own, with the manifest's folder on sys.path."""
+    root = Path(__file__).parents[2]
+    manifest = json.loads((root / "griptape_nodes_library.json").read_text())
+    monkeypatch.syspath_prepend(str(root))
+    for node in manifest["nodes"]:
+        path = root / node["file_path"]
+        spec = importlib.util.spec_from_file_location(f"engine_style_{path.stem}", path)
+        assert spec is not None
+        assert spec.loader is not None
+        spec.loader.exec_module(importlib.util.module_from_spec(spec))

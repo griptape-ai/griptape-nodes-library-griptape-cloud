@@ -75,7 +75,7 @@ from griptape_cloud_client.models.update_bucket_response_content import UpdateBu
 from griptape_cloud_client.types import UNSET, Response
 from griptape_nodes.exe_types.core_types import NodeError
 
-from griptape_cloud.node_errors import api_error, connection_error
+from griptape_cloud.node_errors import API_KEY_NAME, PROVIDER, api_error
 
 if TYPE_CHECKING:
     from griptape_cloud_client.client import AuthenticatedClient
@@ -120,13 +120,11 @@ class GriptapeCloudApiMixin:
         try:
             response = endpoint(client=self.gtc_client, **kwargs)
         except httpx.TransportError as e:
-            raise connection_error(e) from e
+            raise NodeError.from_request_exception(e, provider=PROVIDER, secret_name=API_KEY_NAME) from e
 
         if isinstance(response.parsed, expected_type):
             return response.parsed
-        error = api_error(
-            status_code=int(response.status_code), content=response.content, headers=response.headers, action=action
-        )
+        error = api_error(response, action)
         logger.error("Griptape Cloud request failed: %s", error)
         raise error
 

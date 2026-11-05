@@ -9,7 +9,6 @@ from griptape_nodes.exe_types.core_types import NodeError, Parameter, ParameterM
 from griptape_nodes.exe_types.node_types import ControlNode
 
 from griptape_cloud.base.base_griptape_cloud_node import BaseGriptapeCloudNode
-from griptape_cloud.node_errors import upload_error
 
 logger = logging.getLogger("griptape_nodes")
 
@@ -129,7 +128,9 @@ class UploadAsset(BaseGriptapeCloudNode, ControlNode):
                         upload_response = requests.put(upload_url_response.url, data=file, headers=headers, timeout=300)
                         upload_response.raise_for_status()
                     except requests.RequestException as e:
-                        raise upload_error(e) from e
+                        raise NodeError.from_request_exception(
+                            e, provider="Griptape Cloud storage", key_refused=False
+                        ) from e
 
                 self.parameter_output_values["asset_name"] = asset_name
                 self.parameter_output_values["bucket"] = bucket
