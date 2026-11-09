@@ -88,7 +88,10 @@
       "metadata": {
         "category": "griptape_cloud/assistants",
         "description": "Griptape Node that retrieves a specific assistant.",
-        "display_name": "Get Assistant"
+        "display_name": "Get Assistant",
+        "deprecation": {
+          "deprecation_message": "Griptape Cloud Assistants are no longer supported"
+        }
       }
     },
     {
@@ -97,7 +100,10 @@
       "metadata": {
         "category": "griptape_cloud/assistants",
         "description": "Griptape Node that runs a specific assistant.",
-        "display_name": "Run Assistant"
+        "display_name": "Run Assistant",
+        "deprecation": {
+          "deprecation_message": "Griptape Cloud Assistants are no longer supported"
+        }
       }
     },
     {
