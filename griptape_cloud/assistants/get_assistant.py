@@ -64,6 +64,7 @@ class GetAssistant(BaseGriptapeCloudNode, DataNode):
 
     def validate_before_node_run(self) -> list[Exception] | None:
         exceptions = super().validate_before_node_run() or []
+        # Return early for the missing API key, which is reported first and on its own.
         if exceptions:
             return exceptions
 

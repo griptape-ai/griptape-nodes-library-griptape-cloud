@@ -1,7 +1,7 @@
 import logging
 import os
-import threading
 import time
+import traceback
 from collections.abc import Callable, Generator
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -76,7 +76,7 @@ from griptape_cloud_client.models.update_bucket_response_content import UpdateBu
 from griptape_cloud_client.types import UNSET, Response
 from griptape_nodes.exe_types.core_types import NodeError
 
-from griptape_cloud.node_errors import API_KEY_NAME, PROVIDER, api_error
+from griptape_cloud.node_errors import API_KEY_ENV_VAR, PROVIDER, api_error
 
 if TYPE_CHECKING:
     from griptape_cloud_client.client import AuthenticatedClient
@@ -90,17 +90,6 @@ class GriptapeCloudApiMixin:
     """Mixin class providing shared Griptape Cloud API functionality."""
 
     gtc_client: "AuthenticatedClient"
-
-    @property
-    def _last_http_response(self) -> threading.local:
-        """The last response each thread received, kept by the client's response hook."""
-        if "_last_http_response_local" not in self.__dict__:
-            self.__dict__["_last_http_response_local"] = threading.local()
-        return self.__dict__["_last_http_response_local"]
-
-    def _remember_response(self, response: httpx.Response) -> None:
-        response.read()
-        self._last_http_response.response = response
 
     @staticmethod
     def is_executing_in_structure_runtime() -> bool:
@@ -130,18 +119,18 @@ class GriptapeCloudApiMixin:
             **kwargs: The endpoint's arguments. The client is added here.
         """
         client = self.gtc_client
-        self._last_http_response.response = None
         try:
             response = endpoint(client=client, **kwargs)
         except httpx.TransportError as e:
-            raise NodeError.from_request_exception(e, provider=PROVIDER, secret_name=API_KEY_NAME) from e
+            raise NodeError.from_request_exception(e, provider=PROVIDER, secret_name=API_KEY_ENV_VAR) from e
         except (ValueError, KeyError, TypeError, AttributeError) as e:
-            # The SDK parses the body of every status it has a model for, so an HTML page, an empty body
-            # or a list where an object was expected fails inside the call, after the hook kept the response.
-            # Without a response the error came from our own code, so it is not blamed on Griptape Cloud.
-            if self._last_http_response.response is None:
+            # The SDK parses the body of each status it has a model for, so an HTML page, an empty body or a
+            # list where an object was expected fails inside its `_parse_response`. Any other error comes
+            # from our own code and keeps its type. The status is lost, because the SDK raised before
+            # returning the response.
+            if not any(frame.name == "_parse_response" for frame in traceback.extract_tb(e.__traceback__)):
                 raise
-            raise api_error(self._last_http_response.response, action) from e
+            raise api_error(None, action) from e
 
         if isinstance(response.parsed, expected_type):
             return response.parsed

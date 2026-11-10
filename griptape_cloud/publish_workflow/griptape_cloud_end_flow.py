@@ -22,11 +22,8 @@ from griptape_nodes.retained_mode.events.project_events import (
 )
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
-from griptape_cloud.base.base_griptape_cloud_node import (
-    API_KEY_ENV_VAR,
-    DEFAULT_GRIPTAPE_CLOUD_URL,
-)
 from griptape_cloud.mixins.griptape_cloud_api_mixin import GriptapeCloudApiMixin
+from griptape_cloud.node_errors import API_KEY_ENV_VAR, DEFAULT_GRIPTAPE_CLOUD_URL
 
 logger = logging.getLogger("griptape_nodes")
 
