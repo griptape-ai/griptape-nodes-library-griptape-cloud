@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
+from griptape_nodes.exe_types.core_types import NodeError, Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import DataNode
 
 from griptape_cloud.assistants.assistant_options import AssistantOptions
@@ -62,19 +62,19 @@ class GetAssistant(BaseGriptapeCloudNode, DataNode):
             )
         )
 
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        exceptions = super().validate_before_workflow_run() or []
+    def validate_before_node_run(self) -> list[Exception] | None:
+        exceptions = super().validate_before_node_run() or []
+        # Return early for the missing API key, which is reported first and on its own.
+        if exceptions:
+            return exceptions
 
-        try:
-            if not self.get_parameter_value("assistant_id"):
-                msg = "Assistant ID is not set. Configure the Node with a valid Griptape Cloud Assistant ID before running."
-                exceptions.append(ValueError(msg))
+        if not self.get_parameter_value("assistant_id"):
+            exceptions.append(
+                NodeError(
+                    "No assistant is selected. Choose one in 'assistant_id'.", fields={"parameter": "assistant_id"}
+                )
+            )
 
-        except Exception as e:
-            # Add any exceptions to your list to return
-            exceptions.append(e)
-
-        # if there are exceptions, they will display when the user tries to run the flow with the node.
         return exceptions or None
 
     def after_value_set(

@@ -6,7 +6,7 @@ from typing import Any
 
 from griptape_cloud_client.models.deployment_status import DeploymentStatus
 from griptape_cloud_client.types import Unset
-from griptape_nodes.exe_types.core_types import Parameter, ParameterGroup, ParameterMessage, ParameterMode
+from griptape_nodes.exe_types.core_types import NodeError, Parameter, ParameterGroup, ParameterMessage, ParameterMode
 from griptape_nodes.exe_types.node_types import SuccessFailureNode
 from griptape_nodes.exe_types.param_components.execution_status_component import ExecutionStatusComponent
 
@@ -148,34 +148,37 @@ class GriptapeCloudPublishedWorkflow(SuccessFailureNode, BaseGriptapeCloudNode):
     async def aprocess(self) -> None:
         self._process()
 
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        exceptions = super().validate_before_workflow_run() or []
+    def validate_before_node_run(self) -> list[Exception] | None:
+        exceptions = super().validate_before_node_run() or []
+        # Return early for the missing API key, which is reported first and on its own.
+        if exceptions:
+            return exceptions
+
+        structure_id = self.get_parameter_value("structure_id")
+        if not structure_id:
+            return [
+                NodeError(
+                    "No structure is set. Enter the ID of the Griptape Cloud structure in 'structure_id'.",
+                    fields={"parameter": "structure_id"},
+                )
+            ]
 
         try:
-            if not self.get_parameter_value("structure_id"):
-                msg = "Structure ID is not set. Configure the Node with a valid Griptape Cloud Structure ID before running."
-                exceptions.append(ValueError(msg))
-
-            structure_id = self.get_parameter_value("structure_id")
-
             list_structure_deployments_response = self._list_structure_deployments(
                 structure_id=structure_id, status=[DeploymentStatus.SUCCEEDED]
             )
-            if not any(
-                self._is_deployment_ready(deployment) for deployment in list_structure_deployments_response.deployments
-            ):
-                # Do not raise an exception, just add a warning message to the node
-                # This is important for the "execute immediately on publish" use case
-                # as the structure may still be deploying when the published workflow is invoked
-                self.has_successful_deployment = False
-                self.add_node_element(self.structure_deployment_parameter_message)
-
         except Exception as e:
-            # Add any exceptions to your list to return
-            exceptions.append(e)
+            return [e]
+        if not any(
+            self._is_deployment_ready(deployment) for deployment in list_structure_deployments_response.deployments
+        ):
+            # Do not raise an exception, just add a warning message to the node
+            # This is important for the "execute immediately on publish" use case
+            # as the structure may still be deploying when the published workflow is invoked
+            self.has_successful_deployment = False
+            self.add_node_element(self.structure_deployment_parameter_message)
 
-        # if there are exceptions, they will display when the user tries to run the flow with the node.
-        return exceptions or None
+        return None
 
     def _collect_input_parameters(self) -> dict[str, dict[str, Any]]:
         """Collect input parameters and structure them for the published workflow."""
@@ -250,15 +253,15 @@ class GriptapeCloudPublishedWorkflow(SuccessFailureNode, BaseGriptapeCloudNode):
                 result_details = "Published Workflow executed successfully\n"
                 self._set_status_results(was_successful=True, result_details=f"[{status}]: {result_details}")
 
-    def _handle_error_with_graceful_exit(self, error_details: str, exception: Exception) -> None:
+    def _handle_error_with_graceful_exit(self, exception: Exception) -> None:
         """Handle error with graceful exit if failure output is connected."""
         self._handle_execution_result(
             status=PublishedWorkflowExecutionStatus.FAILED,
-            details=error_details,
+            details=str(exception),
             exception=exception,
         )
         # Use the helper to handle exception based on connection status
-        self._handle_failure_exception(RuntimeError(error_details))
+        self._handle_failure_exception(exception)
 
     def _process(self) -> None:
         try:
@@ -292,8 +295,14 @@ class GriptapeCloudPublishedWorkflow(SuccessFailureNode, BaseGriptapeCloudNode):
             structure_run = self._get_structure_run(structure_run_id=structure_run.structure_run_id)
 
             if structure_run.status in self._get_structure_run_bad_statuses():
-                details = f"Structure run ended with status: {structure_run.status}"
-                raise RuntimeError(details)  # noqa: TRY301
+                details = (
+                    f"The published workflow's structure run ended with status {structure_run.status}. "
+                    "Check the run in Griptape Cloud."
+                )
+                raise NodeError(  # noqa: TRY301
+                    details,
+                    fields={"structure_run_id": structure_run.structure_run_id, "status": str(structure_run.status)},
+                )
 
             output = structure_run.output if not isinstance(structure_run.output, Unset) else None
 
@@ -313,7 +322,6 @@ class GriptapeCloudPublishedWorkflow(SuccessFailureNode, BaseGriptapeCloudNode):
                 details=f"Published workflow executed successfully with Structure Run ID: {structure_run.structure_run_id}",
             )
         except Exception as e:
-            details = f"Error during published workflow execution: {e}"
-            logger.exception(details)
-            self._handle_error_with_graceful_exit(details, e)
+            logger.exception("Error during published workflow execution")
+            self._handle_error_with_graceful_exit(e)
             return
