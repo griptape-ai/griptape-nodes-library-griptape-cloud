@@ -113,17 +113,25 @@ def test_an_unmodelled_status_keeps_its_code_whatever_the_body(server: HTTPServe
     assert exc.value.fields["status_code"] == status
 
 
-@BAD_BODIES
+@pytest.mark.parametrize(
+    ("body", "exception"),
+    [(b"<html>Bad gateway</html>", json.JSONDecodeError), (b"", json.JSONDecodeError), ([1, 2], TypeError)],
+    ids=["html", "empty", "list"],
+)
 @pytest.mark.parametrize("status", [200, 401, 404, 500])
-def test_a_modelled_status_with_a_body_the_sdk_cannot_parse_is_a_node_error(
-    server: HTTPServer, status: int, body: Any
+def test_a_modelled_status_with_a_body_the_sdk_cannot_parse_raises_the_sdks_exception(
+    server: HTTPServer, status: int, body: Any, exception: type[Exception]
 ) -> None:
-    """The SDK raises from its own parser here. The error has no status, because it never returned the response."""
+    """The SDK's own exception propagates, with no status.
+
+    HTML or an empty body raise json.JSONDecodeError and a list raises TypeError. This is a decision, not a
+    gap: wrapping it would depend on the SDK's private parse function name and would only reword a rare error.
+    """
     _reply(status, body)
-    with pytest.raises(NodeError, match="could not read") as exc:
+    with pytest.raises(exception) as exc:
         _api(server)._list_buckets()
 
-    assert isinstance(exc.value.__cause__, (ValueError, KeyError, TypeError, AttributeError))
+    assert not isinstance(exc.value, NodeError)
 
 
 def test_forbidden_is_not_a_refused_key(server: HTTPServer) -> None:

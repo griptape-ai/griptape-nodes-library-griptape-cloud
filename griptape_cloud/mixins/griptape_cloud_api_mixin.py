@@ -1,7 +1,6 @@
 import logging
 import os
 import time
-import traceback
 from collections.abc import Callable, Generator
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -111,6 +110,8 @@ class GriptapeCloudApiMixin:
         The SDK returns the success model for the expected status, a `ClientErrorResponseContent` or
         `ServiceErrorResponseContent` for a documented error, and `None` for any other status. The
         status code and request ID are only on the detailed response, so every call uses `sync_detailed`.
+        The SDK parses the body of a status it has a model for, so a body it can't parse on one of those
+        statuses raises the SDK's own `json.JSONDecodeError` or `TypeError` out of this method.
 
         Args:
             endpoint: A generated `sync_detailed` function.
@@ -123,14 +124,6 @@ class GriptapeCloudApiMixin:
             response = endpoint(client=client, **kwargs)
         except httpx.TransportError as e:
             raise NodeError.from_request_exception(e, provider=PROVIDER, secret_name=API_KEY_ENV_VAR) from e
-        except (ValueError, KeyError, TypeError, AttributeError) as e:
-            # The SDK parses the body of each status it has a model for, so an HTML page, an empty body or a
-            # list where an object was expected fails inside its `_parse_response`. Any other error comes
-            # from our own code and keeps its type. The status is lost, because the SDK raised before
-            # returning the response.
-            if not any(frame.name == "_parse_response" for frame in traceback.extract_tb(e.__traceback__)):
-                raise
-            raise api_error(None, action) from e
 
         if isinstance(response.parsed, expected_type):
             return response.parsed
