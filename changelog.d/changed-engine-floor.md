@@ -1,0 +1,4 @@
+- **Breaking:** Griptape Cloud Library requires engine 0.113.0 or later. Update the engine before
+  updating the library.
+  [#42](https://github.com/griptape-ai/griptape-nodes-library-griptape-cloud/issues/42)
+  [#48](https://github.com/griptape-ai/griptape-nodes-library-griptape-cloud/issues/48)
