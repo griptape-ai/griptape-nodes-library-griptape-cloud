@@ -91,23 +91,30 @@ def _run_entry_point(tmp_path: Path, env_overrides: dict[str, str]) -> dict[str,
 
     The packaged `structure.py` and `structure_workflow_executor.py` run unchanged, in a process of
     their own: the entry point patches engine singletons at import, which must not leak into this
-    test process. `workflow.py`, which publishing generates, is replaced by one that prints the
-    executor's parent run id instead of running a flow.
+    test process. `workflow.py`, which publishing generates, is replaced by one that opens the executor
+    and prints the run the engine then counts spend toward, instead of running a flow.
     """
     package_dir = tmp_path / "package"
     package_dir.mkdir()
     for name in ("structure.py", "structure_workflow_executor.py"):
         shutil.copy(PUBLISH_WORKFLOW_DIR / name, package_dir / name)
     (package_dir / "workflow.py").write_text(
+        "import asyncio\n"
         "import json\n"
+        "from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes\n"
         "def execute_workflow(input, workflow_executor, pickle_control_flow_result):\n"
-        "    print('EXECUTOR ' + json.dumps({'parent_run_id': workflow_executor._parent_run_id}))\n"
+        "    async def report():\n"
+        "        async with workflow_executor:\n"
+        "            parent_run_id = GriptapeNodes.FlowManager().parent_run_id\n"
+        "            print('EXECUTOR ' + json.dumps({'parent_run_id': parent_run_id}))\n"
+        "    asyncio.run(report())\n"
     )
 
     env = {key: value for key, value in os.environ.items() if not key.startswith("GTN_")}
-    # Keep the engine's user config and data, which starting it writes, out of the developer's own.
+    # Keep the engine's user config, data and logs, which starting it writes, out of the developer's own.
     env["XDG_CONFIG_HOME"] = str(tmp_path / "config")
     env["XDG_DATA_HOME"] = str(tmp_path / "data")
+    env["XDG_STATE_HOME"] = str(tmp_path / "state")
     env.update(env_overrides)
 
     completed = subprocess.run(  # noqa: S603
