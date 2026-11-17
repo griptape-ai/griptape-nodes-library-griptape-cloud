@@ -105,7 +105,6 @@ def _run_entry_point(tmp_path: Path, env_overrides: dict[str, str]) -> dict[str,
     )
 
     env = {key: value for key, value in os.environ.items() if not key.startswith("GTN_")}
-    env.pop(PARENT_RUN_ID_ENV_VAR, None)
     # Keep the engine's user config and data, which starting it writes, out of the developer's own.
     env["XDG_CONFIG_HOME"] = str(tmp_path / "config")
     env["XDG_DATA_HOME"] = str(tmp_path / "data")
