@@ -46,6 +46,7 @@ from griptape_cloud_client.models.create_structure_run_response_content import (
     CreateStructureRunResponseContent,
 )
 from griptape_cloud_client.models.deployment_status import DeploymentStatus
+from griptape_cloud_client.models.env_var import EnvVar
 from griptape_cloud_client.models.event_detail import EventDetail
 from griptape_cloud_client.models.get_assistant_run_response_content import (
     GetAssistantRunResponseContent,
@@ -271,13 +272,18 @@ class GriptapeCloudApiMixin:
     def _list_structures(self) -> ListStructuresResponseContent:
         return self._call_api(list_structures, ListStructuresResponseContent, "list structures", page=1, page_size=100)
 
-    def _create_structure_run(self, structure_id: str, args: list[str]) -> CreateStructureRunResponseContent:
+    def _create_structure_run(
+        self, structure_id: str, args: list[str], env_vars: dict[str, str] | None = None
+    ) -> CreateStructureRunResponseContent:
+        body = CreateStructureRunRequestContent(args=args)
+        if env_vars:
+            body.env_vars = [EnvVar(name=name, value=value) for name, value in env_vars.items()]
         return self._call_api(
             create_structure_run,
             CreateStructureRunResponseContent,
             "create structure run",
             structure_id=structure_id,
-            body=CreateStructureRunRequestContent(args=args),
+            body=body,
         )
 
     def _get_structure_run(self, structure_run_id: str) -> GetStructureRunResponseContent:

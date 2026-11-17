@@ -207,7 +207,7 @@ if _project_file.exists():
 _set_libraries(LIBRARIES)
 
 from griptape_nodes.drivers.storage import StorageBackend  # noqa: E402
-from structure_workflow_executor import StructureWorkflowExecutor  # noqa: E402
+from structure_workflow_executor import StructureWorkflowExecutor, parent_run_id_from_env  # noqa: E402
 from workflow import execute_workflow  # type: ignore[attr-defined]  # noqa: E402
 
 if __name__ == "__main__":
@@ -224,6 +224,7 @@ if __name__ == "__main__":
         storage_backend=StorageBackend("gtc"),
         skip_library_loading=True,
         workflows_to_register=[workflow_file_path.as_posix()],
+        parent_run_id=parent_run_id_from_env(),
     )
 
     execute_workflow(input=flow_input, workflow_executor=workflow_runner, pickle_control_flow_result=pickle_result)

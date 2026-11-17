@@ -17,6 +17,7 @@ from griptape_cloud.publish_workflow.parameters.griptape_cloud_structure_config_
 from griptape_cloud.publish_workflow.parameters.griptape_cloud_webhook_config_parameter import (
     GriptapeCloudWebhookConfigParameter,
 )
+from griptape_cloud.publish_workflow.structure_workflow_executor import PARENT_RUN_ID_ENV_VAR
 
 logger = logging.getLogger("griptape_nodes")
 logger.setLevel(logging.INFO)
@@ -279,8 +280,10 @@ class GriptapeCloudPublishedWorkflow(SuccessFailureNode, BaseGriptapeCloudNode):
                 self.remove_node_element(self.structure_deployment_parameter_message)
                 self.has_successful_deployment = True
 
-            # Create and run the structure
-            structure_run = self._create_structure_run(structure_id=self.structure_id, args=args)
+            # Create and run the structure, naming this run so the structure run's spend counts toward it
+            run = self.run_attribution
+            env_vars = {PARENT_RUN_ID_ENV_VAR: run.run_id} if run is not None else None
+            structure_run = self._create_structure_run(structure_id=self.structure_id, args=args, env_vars=env_vars)
 
             # Poll for events if requested
             for events in self._poll_structure_run_events(structure_run_id=structure_run.structure_run_id):
