@@ -8,9 +8,7 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.12.0, <3.13"
 dependencies = [
-    "python-dotenv==1.1.1",
     "griptape-cloud-client>=0.2.0",
-    "pyyaml>=6.0",
 ]
 
 [dependency-groups]
@@ -55,7 +53,6 @@ ignore = [
 exclude = [
   ".venv",
   "**/.venv",
-  "workflows/**"
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -69,9 +66,6 @@ exclude = [
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
-[tool.typos.files]
-extend-exclude = ["workflows"]
-
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
@@ -84,7 +78,6 @@ exclude = [
   "**/node_modules",
   "**/__pycache__",
   "**/.*",
-  "workflows/**",
   "tests/**"
 ]
 pythonVersion = "3.12"
