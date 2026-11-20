@@ -109,11 +109,7 @@ fix: ## Fix project.
 
 .PHONY: test
 test: ## Run tests that need no Griptape Cloud credentials.
-	@uv run pytest tests --ignore=tests/workflows
-
-.PHONY: test/workflows
-test/workflows: ## Run workflow tests. Requires GT_CLOUD_API_KEY.
-	@uv run pytest -s tests/workflows
+	@uv run pytest tests
 
 .PHONY: check
 check: check/format check/lint check/types check/spell check/changelog ## Run all checks.

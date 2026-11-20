@@ -419,8 +419,6 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "griptape-cloud-client" },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
@@ -438,11 +436,7 @@ test = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "griptape-cloud-client", specifier = ">=0.2.0" },
-    { name = "python-dotenv", specifier = "==1.1.1" },
-    { name = "pyyaml", specifier = ">=6.0" },
-]
+requires-dist = [{ name = "griptape-cloud-client", specifier = ">=0.2.0" }]
 
 [package.metadata.requires-dev]
 dev = [
