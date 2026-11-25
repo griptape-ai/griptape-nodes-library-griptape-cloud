@@ -10,6 +10,14 @@ the `library_version` in `griptape_nodes_library.json`.
 
 <!-- Entries go in changelog.d/, one file each. See changelog.d/README.md. -->
 
+## [0.77.0] - 2026-11-25
+
+### Deprecated
+
+- The Griptape Cloud Library declares itself deprecated, so the editor shows it as deprecated and
+  no longer maintained. Remove it from your installed libraries.
+  [#53](https://github.com/griptape-ai/griptape-nodes-library-griptape-cloud/issues/53)
+
 ## [0.76.0] - 2026-11-20
 
 ### Changed
@@ -48,5 +56,6 @@ the `library_version` in `griptape_nodes_library.json`.
   with the status code, instead of `unexpected response type <class 'NoneType'>`.
   [#42](https://github.com/griptape-ai/griptape-nodes-library-griptape-cloud/issues/42)
 
-[Unreleased]: https://github.com/griptape-ai/griptape-nodes-library-griptape-cloud/compare/v0.76.0...HEAD
+[Unreleased]: https://github.com/griptape-ai/griptape-nodes-library-griptape-cloud/compare/v0.77.0...HEAD
+[0.77.0]: https://github.com/griptape-ai/griptape-nodes-library-griptape-cloud/compare/v0.76.0...v0.77.0
 [0.76.0]: https://github.com/griptape-ai/griptape-nodes-library-griptape-cloud/compare/v0.74.0...v0.76.0
